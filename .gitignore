@@ -21,3 +21,8 @@ wheels/
 # dataset
 coco
 
+log/
+output/
+tags
+*.log
+

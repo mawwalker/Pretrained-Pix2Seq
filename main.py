@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+# torch.multiprocessing.set_sharing_strategy('file_system')
 from torch.utils.data import DataLoader, DistributedSampler
 
 import datasets
@@ -24,7 +25,7 @@ def get_args_parser():
     parser.add_argument('--lr', default=1e-3, type=float)
     parser.add_argument('--lr_backbone', default=1e-4, type=float)
     parser.add_argument('--weight_decay', default=0.05, type=float)
-    parser.add_argument('--batch_size', default=4, type=int)
+    parser.add_argument('--batch_size', default=2, type=int)
     parser.add_argument('--epochs', default=300, type=int)
     parser.add_argument('--lr_drop', default=200, type=int)
     parser.add_argument('--clip_max_norm', default=0.1, type=float,
@@ -89,6 +90,8 @@ def get_args_parser():
     parser.add_argument('--world_size', default=1, type=int,
                         help='number of distributed processes')
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
+    
+    parser.add_argument('--num_classes', default=90, type=int, help='max ID of the datasets')
     return parser
 
 
