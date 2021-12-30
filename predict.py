@@ -1,28 +1,14 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 import argparse
-import datetime
-import json
 import random
 import time
-from pathlib import Path
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, DistributedSampler
-
-import datasets
 import util.misc as utils
-from datasets import build_dataset, get_coco_api_from_dataset
-from engine import evaluate, train_one_epoch
-# from models import build_model
 from playground import build_all_model
-from playground.pix2seq.pix2seq import PostProcess
 import datasets.transforms as T
-from util import box_ops
-from timm.utils import NativeScaler
-
 from PIL import Image
-from PIL import ImageDraw,ImageFont
 import cv2
 
 
@@ -176,8 +162,6 @@ def main(args):
     ])
 
     image_new = transform(image, None)
-    # np.transpose(image_new[0].numpy(), (1, 2, 0))
-    # cv2.imwrite('./image_new.jpg', np.transpose(image_new[0].numpy(), (1, 2, 0)))
 
     c,h,w = image_new[0].shape
     image_new = image_new[0].view(1, c, h, w).to(device)
@@ -188,14 +172,8 @@ def main(args):
     print('input_seq: {}'.format(seq.shape))
     output = model([image_new,seq])
 
-    #decode bbox
-    # output, value = output
     out_seq_logits = output['pred_seq_logits']
     
-    # print('shape of output: {}'.format(out_seq_logits.shape))
-    
-    # for i in range(500):
-    #     print(output[i])
     orig_size = torch.as_tensor([int(h_ori), int(w_ori)])
     size = torch.as_tensor([int(h), int(w)])
     origin_img_sizes = torch.stack([orig_size], dim=0)
