@@ -51,7 +51,7 @@ class Pix2Seq(nn.Module):
         if isinstance(image_tensor, (list, torch.Tensor)):
             image_tensor = nested_tensor_from_tensor_list(image_tensor)
         features, pos = self.backbone(image_tensor)
-
+        # print('features.shape: {}, pos.shape: {}'.format(features[0].tensors.shape, pos[0].shape))
         src, mask = features[-1].decompose()
         assert mask is not None
         mask = torch.zeros_like(mask).bool()

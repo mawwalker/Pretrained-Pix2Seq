@@ -35,7 +35,7 @@ def get_args_parser():
     parser.add_argument('--pred_eos', action='store_true', help='use eos token instead of predicting 100 objects')
 
     # * Backbone
-    parser.add_argument('--backbone', default='resnet50', type=str,
+    parser.add_argument('--backbone', default='swin', type=str,
                         help="Name of the convolutional backbone to use")
     parser.add_argument('--dilation', action='store_true',
                         help="If true, we replace stride with dilation in the last convolutional block (DC5)")
@@ -69,10 +69,10 @@ def get_args_parser():
 
     parser.add_argument('--output_dir', default='',
                         help='path where to save, empty for no saving')
-    parser.add_argument('--device', default='cpu',
+    parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='ships_best.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='output/ships_v2/checkpoint_best.pth', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--eval', action='store_true')
@@ -85,7 +85,8 @@ def get_args_parser():
     
     parser.add_argument('--num_classes', default=12, type=int, help='max ID of the datasets')
     
-    parser.add_argument('--img_path', default='/home/dsm/Datasets/ships/val2017/100001085.jpg', type=str, help='the path to predict')
+    parser.add_argument('--img_path', default='/home/dsm/Datasets/ships/val2017/100001000.jpg', type=str, help='the path to predict')
+    parser.add_argument('--swin_path', default='/home/dsm/graduate/Pretrained-Pix2Seq/weights/swin_tiny_patch4_window7_224.pth', help='resume from swin transformer')
     return parser
 
 class Colors:
@@ -133,7 +134,6 @@ def main(args):
     random.seed(seed)
 
     model, criterion, postprocessors = build_all_model[args.model](args)
-    model.to(device)
     
     if args.resume:
         if args.resume.startswith('https'):
@@ -143,6 +143,7 @@ def main(args):
             checkpoint = torch.load(args.resume, map_location='cpu')
         model.load_state_dict(checkpoint['model'])
 
+    model.to(device)
     #read image
     image = Image.open(args.img_path)
     image = image.convert('RGB')
@@ -164,14 +165,15 @@ def main(args):
     image_new = transform(image, None)
 
     c,h,w = image_new[0].shape
+    print(c, h, w)
     image_new = image_new[0].view(1, c, h, w).to(device)
     seq = torch.ones(1, 1).to(device,dtype=torch.long) * 2001
     model.eval()
 
     # get predictions
-    print('input_seq: {}'.format(seq.shape))
+    # print('input_seq: {}'.format(seq.shape))
     output = model([image_new,seq])
-
+    # print('output: {}'.format(output))
     out_seq_logits = output['pred_seq_logits']
     
     orig_size = torch.as_tensor([int(h_ori), int(w_ori)])
@@ -184,7 +186,7 @@ def main(args):
     num_classes = args.num_classes
     scale_fct = torch.stack(
             [ori_img_w / inp_img_w, ori_img_h / inp_img_h,
-             ori_img_w / inp_img_w, ori_img_h / inp_img_h], dim=1).unsqueeze(1)
+             ori_img_w / inp_img_w, ori_img_h / inp_img_h], dim=1).unsqueeze(1).to(device)
     results = []
     image = cv2.imread(args.img_path)
     for b_i, pred_seq_logits in enumerate(out_seq_logits):
@@ -206,11 +208,11 @@ def main(args):
         result['scores'] = []
         result['labels'] = []
         result['boxes'] = []
-        for score, cls, box in zip(scores_per_image.detach().numpy(),
-                                         labels_per_image.detach().numpy(),
-                                         boxes_per_image.detach().numpy()):
+        for score, cls, box in zip(scores_per_image.detach().cpu().numpy(),
+                                         labels_per_image.detach().cpu().numpy(),
+                                         boxes_per_image.detach().cpu().numpy()):
             box = box.tolist()
-            if score > 0.75:
+            if score > 0.25:
                 result['scores'].append(score)
                 result['labels'].append(cls)
                 result['boxes'].append(box)

@@ -1,47 +1,25 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 import argparse
-import datetime
-import json
 import random
 import time
-from pathlib import Path
-
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, DistributedSampler
 
-import datasets
 import util.misc as utils
-from datasets import build_dataset, get_coco_api_from_dataset
-from engine import evaluate, train_one_epoch
-# from models import build_model
 from playground import build_all_model
-from playground.pix2seq.pix2seq import PostProcess
 import datasets.transforms as T
-from util import box_ops
-from timm.utils import NativeScaler
-
 from PIL import Image
-from PIL import ImageDraw,ImageFont
-import cv2
 import torch
-import torch.nn.functional as F
 from torch import nn
 
 from util.misc import nested_tensor_from_tensor_list
 
 from playground.pix2seq.backbone import build_backbone
 from playground.pix2seq.transformer import build_transformer
-from util.box_ops import box_cxcywh_to_xyxy
-from torchviz import make_dot, make_dot_from_trace
 
-import torchvision
-
-from torch.autograd import Variable
-
-from tensorboardX import SummaryWriter
 from collections import namedtuple
 from typing import Any
+from bertviz import model_view
 
 
 def get_args_parser():
@@ -264,23 +242,8 @@ def main(args):
     seq = torch.ones(1, 1).to(device,dtype=torch.long) * 2001
     # model.eval()
     
-    # y = model([image_new, seq])['pred_seq_logits'][0]
-
-    # vis_graph = make_dot(y.mean(), params=dict(model.named_parameters()))
-    # vis_graph.view()
-
-    image_new = Variable(image_new)
-    seq = Variable(seq)
-
-    model_wrapper = ModelWrapper(model)
-    # writer.add_graph(model_wrapper, input_image)
-    # 声明writer对象，保存的文件夹
-
-    writer = SummaryWriter(log_dir=
-                           './log', comment='Pix2Seq')
-
-    with writer:
-        writer.add_graph(model_wrapper, ([image_new, seq],), verbose=True)
+    y = model([image_new, seq])['pred_seq_logits'][0]
+    
 
 
 if __name__ == '__main__':

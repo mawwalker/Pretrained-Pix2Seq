@@ -3,6 +3,11 @@
 Backbone modules.
 """
 from collections import OrderedDict
+from numpy import not_equal
+
+import torch
+from torch import nn
+from typing import Dict
 
 import torch
 import torch.nn.functional as F
@@ -14,7 +19,7 @@ from typing import Dict, List
 from util.misc import NestedTensor, is_main_process
 
 from .position_encoding import build_position_encoding
-
+from .swin_transformer import swin_B, swin_T
 
 class FrozenBatchNorm2d(torch.nn.Module):
     """
@@ -57,7 +62,7 @@ class FrozenBatchNorm2d(torch.nn.Module):
 
 class BackboneBase(nn.Module):
 
-    def __init__(self, backbone: nn.Module, train_backbone: bool, num_channels: int, return_interm_layers: bool):
+    def __init__(self, backbone: nn.Module, backbone_name, train_backbone: bool, num_channels: int, return_interm_layers: bool):
         super().__init__()
         for name, parameter in backbone.named_parameters():
             if not train_backbone or 'layer2' not in name and 'layer3' not in name and 'layer4' not in name:
@@ -66,11 +71,27 @@ class BackboneBase(nn.Module):
             return_layers = {"layer1": "0", "layer2": "1", "layer3": "2", "layer4": "3"}
         else:
             return_layers = {'layer4': "0"}
-        self.body = IntermediateLayerGetter(backbone, return_layers=return_layers)
+        # print('backbone name: {}'.format(backbone_name))
+        if backbone_name.startswith('swin'):
+            # for swin transformer
+            self.body = backbone
+        else:
+            # for ResNet
+            self.body = IntermediateLayerGetter(backbone, return_layers=return_layers)
+        self.backbone_name = backbone_name
         self.num_channels = num_channels
 
     def forward(self, tensor_list: NestedTensor):
-        xs = self.body(tensor_list.tensors)
+        xx = self.body(tensor_list.tensors)
+        if self.backbone_name.startswith('swin'):
+            # for swin transformer
+            xs = OrderedDict()
+            # swin-T transformer 4 layers tuple() type
+            # layer3.shape: (1, 768, 12, 16)
+            xs['0'] = xx[-1]
+        else:
+            xs = xx
+        
         out: Dict[str, NestedTensor] = {}
         for name, x in xs.items():
             m = tensor_list.mask
@@ -82,15 +103,37 @@ class BackboneBase(nn.Module):
 
 class Backbone(BackboneBase):
     """ResNet backbone with frozen BatchNorm."""
-    def __init__(self, name: str,
+    def __init__(self, name: str, swin_path: str,
                  train_backbone: bool,
                  return_interm_layers: bool,
                  dilation: bool):
-        backbone = getattr(torchvision.models, name)(
-            replace_stride_with_dilation=[False, False, dilation],
-            pretrained=is_main_process(), norm_layer=FrozenBatchNorm2d)
+        if name == 'swin_T':
+            # backbone = SwinTransformer(patch_size=4,
+            #             in_chans=3,
+            #             embed_dim=96,
+            #             depths=[ 2, 2, 6, 2 ],
+            #             num_heads=[ 3, 6, 12, 24 ],
+            #             window_size=7)
+            backbone = swin_T(patch_size=4, in_chans=3, window_size=7)
+            if swin_path != '':
+                backbone.init_weights(swin_path)
+        elif name == 'swin_B':
+            backbone = swin_B(patch_size=4, in_chans=3, window_size=7)
+            if swin_path != '':
+                backbone.init_weights(swin_path)
+        else:
+            backbone = getattr(torchvision.models, name)(
+                replace_stride_with_dilation=[False, False, dilation],
+                pretrained=is_main_process(), norm_layer=FrozenBatchNorm2d)
+        
         num_channels = 512 if name in ('resnet18', 'resnet34') else 2048
-        super().__init__(backbone, train_backbone, num_channels, return_interm_layers)
+        if name in ('swin_T', 'swin_S'):
+            num_channels = 768
+        elif name == 'swin_B':
+            num_channels = 1024
+        elif name == 'swin_L':
+            num_channels = 1536
+        super().__init__(backbone, name, train_backbone, num_channels, return_interm_layers)
 
 
 class Joiner(nn.Sequential):
@@ -113,7 +156,7 @@ def build_backbone(args):
     position_embedding = build_position_encoding(args)
     train_backbone = args.lr_backbone > 0
     return_interm_layers = False
-    backbone = Backbone(args.backbone, train_backbone, return_interm_layers, args.dilation)
+    backbone = Backbone(args.backbone, args.swin_path, train_backbone, return_interm_layers, args.dilation)
     model = Joiner(backbone, position_embedding)
     model.num_channels = backbone.num_channels
     return model
