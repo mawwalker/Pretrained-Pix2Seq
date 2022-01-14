@@ -86,7 +86,7 @@ def get_args_parser():
     parser.add_argument('--num_classes', default=12, type=int, help='max ID of the datasets')
     
     parser.add_argument('--img_path', default='/home/dsm/Datasets/ships/val2017/100001000.jpg', type=str, help='the path to predict')
-    parser.add_argument('--swin_path', default='/home/dsm/graduate/Pretrained-Pix2Seq/weights/swin_tiny_patch4_window7_224.pth', help='resume from swin transformer')
+    parser.add_argument('--swin_path', default='', help='resume from swin transformer')
     return parser
 
 class Colors:

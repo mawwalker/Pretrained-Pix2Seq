@@ -3,8 +3,7 @@ import torch
 
 # pretrained_weights = torch.load('./coco_ap370.pth')
 
-pretrained_weights = torch.load('output/ships_v3/checkpoint_best.pth', map_location='cpu')
-pretrained_weights = torch.load('output/ships_v2/eval/150.pth', map_location='cpu')
+pretrained_weights = torch.load('output/ships_v3_L/checkpoint_best.pth', map_location='cpu')
 
 num_classes = 12 + 1
 num_bins = 2000
@@ -20,15 +19,15 @@ transformer.det_embed.weight: torch.Size([1, 256])
 transformer.vocal_embed.weight: torch.Size([2092, 256])
 '''
 
-# model = pretrained_weights['model']
+model = pretrained_weights['model']
 # print(model)
 
-print(pretrained_weights.keys())
-print(pretrained_weights['counts'])
+# print(pretrained_weights.keys())
+# print(pretrained_weights['counts'])
 
-# for x in model:
-#     if isinstance(model[x], torch.Tensor):
-#         print('{}: {}'.format(x, model[x].shape))
+for x in model:
+    if isinstance(model[x], torch.Tensor):
+        print('{}: {}'.format(x, model[x].shape))
 
 # pretrained_weights["model"]["class_embed.weight"].resize_(num_class+1,256)
 # pretrained_weights["model"]["class_embed.bias"].resize_(num_class+1)
