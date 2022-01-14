@@ -19,7 +19,7 @@ from typing import Dict, List
 from util.misc import NestedTensor, is_main_process
 
 from .position_encoding import build_position_encoding
-from .swin_transformer import swin_B, swin_T
+from .swin_transformer import swin_B, swin_T, swin_L
 
 class FrozenBatchNorm2d(torch.nn.Module):
     """
@@ -108,17 +108,15 @@ class Backbone(BackboneBase):
                  return_interm_layers: bool,
                  dilation: bool):
         if name == 'swin_T':
-            # backbone = SwinTransformer(patch_size=4,
-            #             in_chans=3,
-            #             embed_dim=96,
-            #             depths=[ 2, 2, 6, 2 ],
-            #             num_heads=[ 3, 6, 12, 24 ],
-            #             window_size=7)
             backbone = swin_T(patch_size=4, in_chans=3, window_size=7)
             if swin_path != '':
                 backbone.init_weights(swin_path)
         elif name == 'swin_B':
             backbone = swin_B(patch_size=4, in_chans=3, window_size=7)
+            if swin_path != '':
+                backbone.init_weights(swin_path)
+        elif name == 'swin_L':
+            backbone = swin_L(patch_size=4, in_chans=3, window_size=7)
             if swin_path != '':
                 backbone.init_weights(swin_path)
         else:

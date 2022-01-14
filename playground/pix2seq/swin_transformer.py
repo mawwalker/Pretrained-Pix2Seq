@@ -649,3 +649,12 @@ def swin_B(patch_size=4, in_chans=3, window_size=7):
                             depths=[ 2, 2, 18, 2 ],
                             num_heads=[ 4, 8, 16, 32 ],
                             window_size=window_size)
+    
+
+def swin_L(patch_size=4, in_chans=3, window_size=7):
+    return SwinTransformer(patch_size=patch_size,
+                            in_chans=in_chans,
+                            embed_dim=192,
+                            depths=[ 2, 2, 18, 2 ],
+                            num_heads=[ 6, 12, 24, 48 ],
+                            window_size=window_size)
