@@ -354,6 +354,7 @@ def build_transformer(args, num_vocal):
     return Transformer(
         d_model=args.hidden_dim,
         dropout=args.dropout,
+        activation=args.activation,
         nhead=args.nheads,
         dim_feedforward=args.dim_feedforward,
         num_encoder_layers=args.enc_layers,

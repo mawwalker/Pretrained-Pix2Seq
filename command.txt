@@ -1,0 +1,3 @@
+screen -L sh train_ships.sh --model pix2seq --resume pix2seq_r50_13.pth --transfer --output_dir ./output/ships_v5 --backbone swin_L --swin_path weights/swin_large_patch4_window7_224_22k.pth --activation gelu
+
+sh train_ships.sh --model pix2seq --resume output/ships_v4/checkpoint_best.pth --output_dir ./output/ships_v4  --backbone swin_L --eval

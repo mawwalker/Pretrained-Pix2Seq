@@ -94,6 +94,7 @@ def get_args_parser():
     parser.add_argument('--num_classes', default=12, type=int, help='max ID of the datasets')
     parser.add_argument('--swin_path', default='', help='swin transformer Pretrained model path')
     parser.add_argument('--transfer', action='store_true', help='transfer learning from swin & COCO-pretrained-pix2seq')
+    parser.add_argument('--activation', default='relu', help='transformer activation function')
     return parser
 
 
