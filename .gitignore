@@ -21,3 +21,10 @@ wheels/
 # dataset
 coco
 
+log/
+output/
+tags
+*.log
+.ipynb_checkpoints/
+
+screenlog.0

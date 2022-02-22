@@ -51,7 +51,7 @@ class Pix2Seq(nn.Module):
         if isinstance(image_tensor, (list, torch.Tensor)):
             image_tensor = nested_tensor_from_tensor_list(image_tensor)
         features, pos = self.backbone(image_tensor)
-
+        # print('features.shape: {}, pos.shape: {}'.format(features[0].tensors.shape, pos[0].shape))
         src, mask = features[-1].decompose()
         assert mask is not None
         mask = torch.zeros_like(mask).bool()
@@ -270,7 +270,8 @@ def build(args):
     # you should pass `num_classes` to be 2 (max_obj_id + 1).
     # For more details on this, check the following discussion
     # https://github.com/facebookresearch/detr/issues/108#issuecomment-650269223
-    num_classes = 20 if args.dataset_file != 'coco' else 91
+    # num_classes = 20 if args.dataset_file != 'coco' else 91
+    num_classes = args.num_classes + 1
     if args.dataset_file == "coco_panoptic":
         # for panoptic, we just add a num_classes that is large enough to hold
         # max_obj_id + 1, but the exact value doesn't really matter
