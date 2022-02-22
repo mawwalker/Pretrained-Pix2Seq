@@ -82,7 +82,7 @@ class BackboneBase(nn.Module):
         self.num_channels = num_channels
 
     def forward(self, tensor_list: NestedTensor):
-        xx = self.body(tensor_list.tensors)
+        xx = self.body(tensor_list.tensors, tensor_list.mask)
         if self.backbone_name.startswith('swin'):
             # for swin transformer
             xs = OrderedDict()
@@ -113,6 +113,10 @@ class Backbone(BackboneBase):
                                                 window_size=7)
             if swin_path != '':
                 backbone.init_weights(swin_path)
+            backbone.finetune_det(method='vidt',
+                    det_token_num=100,
+                    pos_dim=256,
+                    cross_indices=[3])
         else:
             backbone = getattr(torchvision.models, name)(
                 replace_stride_with_dilation=[False, False, dilation],
