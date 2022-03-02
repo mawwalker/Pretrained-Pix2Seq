@@ -17,14 +17,14 @@ from .attention_layer import Attention
 
 # Self-attention with 2D relative position encoding
 from .rpe_attention import RPEMultiheadAttention, irpe
-
+from .deformable_attn import DeformableHeadAttention, generate_ref_points
 
 class Transformer(nn.Module):
 
     def __init__(self, d_model=512, nhead=8, num_encoder_layers=6,
                  num_decoder_layers=6, dim_feedforward=1024, dropout=0.1,
                  activation="relu", normalize_before=False, num_vocal=2094,
-                 pred_eos=False):
+                 pred_eos=False, scales=4, k=4, last_height=16, last_width=16):
         super().__init__()
         rpe_config = irpe.get_rpe_config(
                         ratio=1.9,
@@ -35,14 +35,22 @@ class Transformer(nn.Module):
                         rpe_on='k',
                     )
         encoder_layer = TransformerEncoderLayer(
-            d_model, nhead, dim_feedforward, dropout, activation, normalize_before,
+            d_model, nhead, k=k, scales=scales,
+            last_feat_height=last_height,
+            last_feat_width=last_width, 
+            dim_feedforward=dim_feedforward, dropout=dropout,
+            activation=activation, normalize_before=normalize_before,
             rpe_config=rpe_config
             )
         encoder_norm = nn.LayerNorm(d_model) if normalize_before else None
         self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
 
         decoder_layer = TransformerDecoderLayer(
-            d_model, nhead, dim_feedforward, dropout, activation, normalize_before)
+            d_model, nhead, k=k, scales=scales,
+            last_feat_height=last_height,
+            last_feat_width=last_width, 
+            dim_feedforward=dim_feedforward, dropout=dropout,
+            activation=activation, normalize_before=normalize_before)
         decoder_norm = nn.LayerNorm(d_model)
         self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm)
         self._reset_parameters()
@@ -56,6 +64,7 @@ class Transformer(nn.Module):
         self.d_model = d_model
         self.nhead = nhead
         self.num_decoder_layers = num_decoder_layers
+        # self.query_ref_point_proj = nn.Linear(d_model, 2)
 
     def _reset_parameters(self):
         for p in self.parameters():
@@ -73,11 +82,20 @@ class Transformer(nn.Module):
         # flatten NxCxHxW to HWxNxC
         # bs = src.shape[0]
         bs, c, h, w = src.shape
+
+        # ref_points = []
+        ref_points = generate_ref_points(width=w,
+                                        height=h)
+        ref_points = ref_points.type_as(src)
+        # H, W, 2 -> B, H, W, 2
+        ref_points = ref_points.unsqueeze(0).repeat(bs, 1, 1, 1)
+        # ref_points.append(ref_point)
+
         src = src.flatten(2).permute(2, 0, 1)
         mask = mask.flatten(1)
         pos_embed = pos_embed.flatten(2).permute(2, 0, 1)
 
-        memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed, hw=(h, w))
+        memory = self.encoder(src, ref_points, src_key_padding_mask=mask, pos=pos_embed, hw=(h, w))
         pre_kv = [torch.as_tensor([[], []], device=memory.device)
                   for _ in range(self.num_decoder_layers)]
 
@@ -139,14 +157,14 @@ class TransformerEncoder(nn.Module):
         self.num_layers = num_layers
         self.norm = norm
 
-    def forward(self, src,
+    def forward(self, src, ref_points,
                 src_key_padding_mask: Optional[Tensor] = None,
                 pos: Optional[Tensor] = None,
                 hw=None):
         output = src
 
         for layer in self.layers:
-            output = layer(output, src_key_padding_mask=src_key_padding_mask, pos=pos, hw=hw)
+            output = layer(output, ref_points, src_key_padding_mask=src_key_padding_mask, pos=pos, hw=hw)
 
         if self.norm is not None:
             output = self.norm(output)
@@ -183,13 +201,26 @@ class TransformerDecoder(nn.Module):
 
 class TransformerEncoderLayer(nn.Module):
 
-    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1,
+    def __init__(self, d_model, nhead,
+                 k: int,
+                 scales: int,
+                 last_feat_height: int,
+                 last_feat_width: int,
+                 dim_feedforward=2048, dropout=0.1,
                  activation="relu", normalize_before=False,
                  rpe_config=None):
         super().__init__()
         # self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
         self.self_attn = RPEMultiheadAttention(
             d_model, nhead, dropout=dropout, rpe_config=rpe_config)
+        # self.ms_deformbale_attn = DeformableHeadAttention(h=nhead,
+        #                                                   d_model=d_model,
+        #                                                   k=k,
+        #                                                   scales=scales,
+        #                                                   last_feat_height=last_feat_height,
+        #                                                   last_feat_width=last_feat_width,
+        #                                                   dropout=dropout,
+        #                                                   need_attn=False)
         # Implementation of Feedforward model
         self.linear1 = nn.Linear(d_model, dim_feedforward)
         self.dropout = nn.Dropout(dropout)
@@ -207,12 +238,17 @@ class TransformerEncoderLayer(nn.Module):
         return tensor if pos is None else tensor + pos
 
     def forward_post(self,
-                     src,
+                     src, ref_points,
                      src_key_padding_mask: Optional[Tensor] = None,
                      pos: Optional[Tensor] = None,
                      hw=None):
         q = k = self.with_pos_embed(src, pos)
         src2 = self.self_attn(q, k, value=src, key_padding_mask=src_key_padding_mask, hw=hw)[0]
+        # src2, attns = self.ms_deformbale_attn(src,
+        #                                           src_tensors,
+        #                                           ref_point,
+        #                                           query_mask=src_key_padding_mask,
+        #                                           key_masks=src_key_padding_masks)
         src = src + self.dropout1(src2)
         src = self.norm1(src)
         src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
@@ -220,7 +256,7 @@ class TransformerEncoderLayer(nn.Module):
         src = self.norm2(src)
         return src
 
-    def forward_pre(self, src,
+    def forward_pre(self, src, ref_points,
                     src_key_padding_mask: Optional[Tensor] = None,
                     pos: Optional[Tensor] = None,
                     hw=None):
@@ -233,18 +269,23 @@ class TransformerEncoderLayer(nn.Module):
         src = src + self.dropout2(src2)
         return src
 
-    def forward(self, src,
+    def forward(self, src, ref_points,
                 src_key_padding_mask: Optional[Tensor] = None,
                 pos: Optional[Tensor] = None,
                 hw=None):
         if self.normalize_before:
-            return self.forward_pre(src, src_key_padding_mask, pos, hw=hw)
-        return self.forward_post(src, src_key_padding_mask, pos, hw=hw)
+            return self.forward_pre(src, ref_points, src_key_padding_mask, pos, hw=hw)
+        return self.forward_post(src, ref_points, src_key_padding_mask, pos, hw=hw)
 
 
 class TransformerDecoderLayer(nn.Module):
 
-    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1,
+    def __init__(self, d_model, nhead,
+                 k: int,
+                 scales: int,
+                 last_feat_height: int,
+                 last_feat_width: int,
+                 dim_feedforward=2048, dropout=0.1,
                  activation="relu", normalize_before=False):
         super().__init__()
         self.self_attn = Attention(d_model, nhead, dropout=dropout)

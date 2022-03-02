@@ -62,7 +62,8 @@ class FrozenBatchNorm2d(torch.nn.Module):
 
 class BackboneBase(nn.Module):
 
-    def __init__(self, backbone: nn.Module, backbone_name, train_backbone: bool, num_channels: int, return_interm_layers: bool):
+    def __init__(self, backbone: nn.Module, backbone_name, train_backbone: bool,
+                 num_channels: int, return_interm_layers: bool, hidden_dim: int = 256):
         super().__init__()
         for name, parameter in backbone.named_parameters():
             if not train_backbone or 'layer2' not in name and 'layer3' not in name and 'layer4' not in name:
@@ -81,6 +82,19 @@ class BackboneBase(nn.Module):
         self.backbone_name = backbone_name
         self.num_channels = num_channels
 
+        # self.input_proj1 = nn.Sequential(
+        #             nn.Conv2d(num_channels//4, hidden_dim, kernel_size=(1, 1)),
+        #             nn.GroupNorm(32, hidden_dim))
+        # self.input_proj2 = nn.Sequential(
+        #             nn.Conv2d(num_channels//2, hidden_dim, kernel_size=(1, 1)),
+        #             nn.GroupNorm(32, hidden_dim))
+        # self.input_proj3 = nn.Sequential(
+        #             nn.Conv2d(num_channels, hidden_dim, kernel_size=(1, 1)),
+        #             nn.GroupNorm(32, hidden_dim))
+        self.input_proj4 = nn.Sequential(
+                    nn.Conv2d(num_channels, hidden_dim, kernel_size=(3, 3), stride=2),
+                    nn.GroupNorm(32, hidden_dim))
+
     def forward(self, tensor_list: NestedTensor):
         xx = self.body(tensor_list.tensors)
         if self.backbone_name.startswith('swin'):
@@ -88,16 +102,33 @@ class BackboneBase(nn.Module):
             xs = OrderedDict()
             # swin-T transformer 4 layers tuple() type
             # layer3.shape: (1, 768, 12, 16)
-            xs['0'] = xx[-1]
+            # xs['0'] = xx[1]
+            # xs['1'] = xx[2]
+            xs['2'] = xx[3]
+            # print('xs[0].shape: {}, xs[1].shape: {}, xs[2].shape: {}'.format(xs['0'].shape, xs['1'].shape, xs['2'].shape))
         else:
             xs = xx
-        
+        m = tensor_list.mask
+        assert m is not None
         out: Dict[str, NestedTensor] = {}
         for name, x in xs.items():
-            m = tensor_list.mask
-            assert m is not None
-            mask = F.interpolate(m[None].float(), size=x.shape[-2:]).to(torch.bool)[0]
-            out[name] = NestedTensor(x, mask)
+            scale_map = self.input_proj4(x)
+            mask = F.interpolate(m[None].float(), size=scale_map.shape[-2:]).to(torch.bool)[0]
+            out[name] = NestedTensor(scale_map, mask)
+            
+        #     if name == '0':
+        #         scale_map = self.input_proj1(x)
+        #     elif name == '1':
+        #         scale_map = self.input_proj2(x)
+        #     else:
+        #         scale_map = self.input_proj3(x)
+        #     mask = F.interpolate(m[None].float(), size=scale_map.shape[-2:]).to(torch.bool)[0]
+        #     out[name] = NestedTensor(scale_map, mask)
+
+        # c4 = self.input_proj4(xs['2'])
+        # mask = F.interpolate(m[None].float(), size=c4.shape[-2:]).to(torch.bool)[0]
+        # out['3'] = NestedTensor(c4, mask)
+
         return out
 
 

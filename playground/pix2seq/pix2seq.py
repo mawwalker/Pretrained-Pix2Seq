@@ -30,9 +30,9 @@ class Pix2Seq(nn.Module):
         hidden_dim = transformer.d_model
         self.num_classes = num_classes
         self.num_bins = num_bins
-        self.input_proj = nn.Sequential(
-            nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=(1, 1)),
-            nn.GroupNorm(32, hidden_dim))
+        # self.input_proj = nn.Sequential(
+        #     nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=(1, 1)),
+        #     nn.GroupNorm(32, hidden_dim))
         self.backbone = backbone
 
     def forward(self, samples):
@@ -56,7 +56,7 @@ class Pix2Seq(nn.Module):
         assert mask is not None
         mask = torch.zeros_like(mask).bool()
 
-        src = self.input_proj(src)
+        # src = self.input_proj(src)
         if self.training:
             out = self.forward_train(src, targets, mask, pos[-1])
         else:
