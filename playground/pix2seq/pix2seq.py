@@ -68,7 +68,15 @@ class Pix2Seq(nn.Module):
             out = self.forward_train(tensors, targets, masks, poses)
         else:
             out = self.forward_inference(tensors, masks, poses)
-
+        # inversed_ref_point = - torch.log(1 / (ref_point + 1e-10) - 1 + 1e-10)
+        # seq_len = out.shape[1]
+        # Bs, S, L = out.shape
+        # if seq_len >= 5:
+        #     num_objects = seq_len // 5
+        #     out = out[:, :int(num_objects * 5), :].reshape(Bs, num_objects, 5, -1)
+        #     inversed_ref_point = inversed_ref_point.reshape(Bs, num_objects, 5, -1)
+        #     out[:, :4, :self.num_bins + 1] = out[:, :4, :self.num_bins + 1] + inversed_ref_point[:, :4, :self.num_bins + 1]
+        #     out.reshape(Bs, S, L)
         out = {'pred_seq_logits': out}
         return out
 
