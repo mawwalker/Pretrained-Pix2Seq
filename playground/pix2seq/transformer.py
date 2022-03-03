@@ -64,7 +64,7 @@ class Transformer(nn.Module):
         self.d_model = d_model
         self.nhead = nhead
         self.num_decoder_layers = num_decoder_layers
-        # self.query_ref_point_proj = nn.Linear(d_model, 2)
+        self.query_ref_point_proj = nn.Linear(d_model, 2)
 
     def _reset_parameters(self):
         for p in self.parameters():
@@ -106,10 +106,10 @@ class Transformer(nn.Module):
         # mask = mask.flatten(1)
         # pos_embed = pos_embed.flatten(2).permute(2, 0, 1)
         memory = self.encoder(src, ref_points, src_key_padding_masks=masks, poses=pos_embeds, hw=(h, w))
-        for index in range(len(memory)):
-            memory[index] = memory[index].flatten(1, 2).permute(1, 0, 2)
-            masks[index] = masks[index].flatten(1)
-            pos_embeds[index] = pos_embeds[index].flatten(1, 2).permute(1, 0, 2)
+        # for index in range(len(memory)):
+        #     memory[index] = memory[index].flatten(1, 2).permute(1, 0, 2)
+        #     masks[index] = masks[index].flatten(1)
+        #     pos_embeds[index] = pos_embeds[index].flatten(1, 2).permute(1, 0, 2)
         pre_kv = [torch.as_tensor([[], []], device=memory[0].device)
                   for _ in range(self.num_decoder_layers)]
 
@@ -121,11 +121,15 @@ class Transformer(nn.Module):
             num_seq = input_embed.shape[0]
             self_attn_mask = torch.triu(torch.ones((num_seq, num_seq)), diagonal=1).bool(). \
                 to(input_embed.device)
+            # L, B, C
+            query_ref_point = self.query_ref_point_proj(input_embed)
+            query_ref_point = torch.sigmoid(query_ref_point)
             hs, pre_kv = self.decoder(
                 input_embed,
-                memory[0],
-                memory_key_padding_mask=masks[0],
-                pos=pos_embeds[0],
+                memory,
+                query_ref_point,
+                memory_key_padding_masks=masks,
+                poses=pos_embeds,
                 pre_kv_list=pre_kv,
                 self_attn_mask=self_attn_mask)
             pred_seq_logits = self.vocal_classifier(hs.transpose(0, 1))
@@ -135,12 +139,16 @@ class Transformer(nn.Module):
             end_lens = torch.zeros(bs).long().to(memory[0].device)
             input_embed = self.det_embed.weight.unsqueeze(0).repeat(bs, 1, 1).transpose(0, 1)
             pred_seq_logits = []
+            # L, B, C
+            query_ref_point = self.query_ref_point_proj(input_embed)
+            query_ref_point = torch.sigmoid(query_ref_point)
             for seq_i in range(500):
                 hs, pre_kv = self.decoder(
                     input_embed,
-                    memory[0],
-                    memory_key_padding_mask=masks[0],
-                    pos=pos_embeds[0],
+                    memory,
+                    query_ref_point,
+                    memory_key_padding_masks=masks,
+                    poses=pos_embeds,
                     pre_kv_list=pre_kv)
                 similarity = self.vocal_classifier(hs)
                 pred_seq_logits.append(similarity.transpose(0, 1))
@@ -196,15 +204,16 @@ class TransformerDecoder(nn.Module):
         self.num_layers = num_layers
         self.norm = norm
 
-    def forward(self, tgt, memory, memory_key_padding_mask, pos, pre_kv_list=None, self_attn_mask=None):
+    def forward(self, tgt, memory, ref_point, memory_key_padding_masks, poses, pre_kv_list=None, self_attn_mask=None):
         output = tgt
         cur_kv_list = []
         for layer, pre_kv in zip(self.layers, pre_kv_list):
             output, cur_kv = layer(
                 output,
                 memory,
-                memory_key_padding_mask=memory_key_padding_mask,
-                pos=pos,
+                ref_point,
+                memory_key_padding_masks=memory_key_padding_masks,
+                poses=poses,
                 self_attn_mask=self_attn_mask,
                 pre_kv=pre_kv)
             cur_kv_list.append(cur_kv)
@@ -357,11 +366,20 @@ class TransformerDecoderLayer(nn.Module):
                  scales: int,
                  last_feat_height: int,
                  last_feat_width: int,
+                 need_attn=False,
                  dim_feedforward=2048, dropout=0.1,
                  activation="relu", normalize_before=False):
         super().__init__()
         self.self_attn = Attention(d_model, nhead, dropout=dropout)
-        self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        # self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        self.ms_deformbale_attn = DeformableHeadAttention(h=nhead,
+                                                          d_model=d_model,
+                                                          k=k,
+                                                          scales=scales,
+                                                          last_feat_height=last_feat_height,
+                                                          last_feat_width=last_feat_width,
+                                                          dropout=dropout,
+                                                          need_attn=need_attn)
         # Implementation of Feedforward model
         self.linear1 = nn.Linear(d_model, dim_feedforward)
         self.dropout = nn.Dropout(dropout)
@@ -376,6 +394,8 @@ class TransformerDecoderLayer(nn.Module):
 
         self.activation = _get_activation_fn(activation)
         self.normalize_before = normalize_before
+        self.need_attn = need_attn
+        self.attns = []
 
     def with_pos_embed(self, tensor, pos: Optional[Tensor]):
         return tensor if pos is None else tensor + pos
@@ -384,33 +404,55 @@ class TransformerDecoderLayer(nn.Module):
             self,
             tgt,
             memory,
-            memory_key_padding_mask: Optional[Tensor] = None,
-            pos: Optional[Tensor] = None,
+            ref_point,
+            memory_key_padding_masks: Optional[Tensor] = None,
+            poses: Optional[Tensor] = None,
             self_attn_mask: Optional[Tensor] = None,
             pre_kv=None,
     ):
         tgt2, pre_kv = self.self_attn(tgt, pre_kv=pre_kv, attn_mask=self_attn_mask)
         tgt = tgt + self.dropout1(tgt2)
         tgt = self.norm1(tgt)
-        tgt2 = self.multihead_attn(
-            query=tgt,
-            key=self.with_pos_embed(memory, pos),
-            value=memory,
-            key_padding_mask=memory_key_padding_mask,
-        )[0]
+        # tgt2 = self.multihead_attn(
+        #     query=tgt,
+        #     key=self.with_pos_embed(memory, pos),
+        #     value=memory,
+        #     key_padding_mask=memory_key_padding_mask,
+        # )[0]
+        memory = [self.with_pos_embed(tensor, pos) for tensor, pos in zip(memory, poses)]
+
+        # L, B, C -> B, L, 1, C
+        tgt = tgt.transpose(0, 1).unsqueeze(dim=2)
+        ref_point = ref_point.transpose(0, 1).unsqueeze(dim=2)
+
+        # B, L, 1, C
+        tgt2, attns = self.ms_deformbale_attn(tgt,
+                                              memory,
+                                              ref_point,
+                                              query_mask=None,
+                                              key_masks=memory_key_padding_masks)
+
+        if self.need_attn:
+            self.attns.append(attns)
+
         tgt = tgt + self.dropout2(tgt2)
         tgt = self.norm2(tgt)
         tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
         tgt = tgt + self.dropout3(tgt2)
         tgt = self.norm3(tgt)
+        
+        # B, L, 1, C -> L, B, C
+        tgt = tgt.squeeze(dim=2)
+        tgt = tgt.transpose(0, 1).contiguous()
         return tgt, pre_kv
 
     def forward_pre(
             self,
             tgt,
             memory,
-            memory_key_padding_mask: Optional[Tensor] = None,
-            pos: Optional[Tensor] = None,
+            ref_point,
+            memory_key_padding_masks: Optional[Tensor] = None,
+            poses: Optional[Tensor] = None,
             self_attn_mask: Optional[Tensor] = None,
             pre_kv=None,
     ):
@@ -418,12 +460,30 @@ class TransformerDecoderLayer(nn.Module):
         tgt2, pre_kv = self.self_attn(tgt2, pre_kv=pre_kv, attn_mask=self_attn_mask)
         tgt = tgt + self.dropout1(tgt2)
         tgt2 = self.norm2(tgt)
-        tgt2 = self.multihead_attn(
-            query=tgt2,
-            key=self.with_pos_embed(memory, pos),
-            value=memory,
-            key_padding_mask=memory_key_padding_mask,
-        )[0]
+        # tgt2 = self.multihead_attn(
+        #     query=tgt2,
+        #     key=self.with_pos_embed(memory, pos),
+        #     value=memory,
+        #     key_padding_mask=memory_key_padding_mask,
+        # )[0]
+        
+        memory = [self.with_pos_embed(tensor, pos) for tensor, pos in zip(memory, poses)]
+
+        # L, B, C -> B, L, 1, C
+        tgt2 = tgt2.transpose(0, 1).unsqueeze(dim=2)
+        ref_point = ref_point.transpose(0, 1).unsqueeze(dim=2)
+
+        # B, L, 1, 2
+        tgt2, attns = self.ms_deformbale_attn(tgt2, memory, ref_point,
+                                              query_mask=None,
+                                              key_masks=memory_key_padding_masks)
+        if self.need_attn:
+            self.attns.append(attns)
+
+        # B, L, 1, C -> L, B, C
+        tgt2 = tgt2.squeeze(dim=2)
+        tgt2 = tgt2.transpose(0, 1).contiguous()
+
         tgt = tgt + self.dropout2(tgt2)
         tgt2 = self.norm3(tgt)
         tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt2))))
@@ -434,14 +494,15 @@ class TransformerDecoderLayer(nn.Module):
             self,
             tgt,
             memory,
-            memory_key_padding_mask: Optional[Tensor] = None,
-            pos: Optional[Tensor] = None,
+            ref_point,
+            memory_key_padding_masks: Optional[Tensor] = None,
+            poses: Optional[Tensor] = None,
             self_attn_mask: Optional[Tensor] = None,
             pre_kv=None,
     ):
         if self.normalize_before:
-            return self.forward_pre(tgt, memory, memory_key_padding_mask, pos, self_attn_mask, pre_kv)
-        return self.forward_post(tgt, memory, memory_key_padding_mask, pos, self_attn_mask, pre_kv)
+            return self.forward_pre(tgt, memory, ref_point, memory_key_padding_masks, poses, self_attn_mask, pre_kv)
+        return self.forward_post(tgt, memory, ref_point, memory_key_padding_masks, poses, self_attn_mask, pre_kv)
 
 
 class MLP(nn.Module):
