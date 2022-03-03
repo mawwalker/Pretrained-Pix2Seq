@@ -17,7 +17,7 @@ from util.box_ops import box_cxcywh_to_xyxy
 
 class Pix2Seq(nn.Module):
     """ This is the Pix2Seq module that performs object detection """
-    def __init__(self, backbone, transformer, num_classes, num_bins=2000):
+    def __init__(self, backbone, transformer, num_classes, num_bins=2000, input_size=1333):
         """ Initializes the model.
         Parameters:
             backbone: torch module of the backbone to be used. See backbone.py
@@ -34,6 +34,7 @@ class Pix2Seq(nn.Module):
         #     nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=(1, 1)),
         #     nn.GroupNorm(32, hidden_dim))
         self.backbone = backbone
+        self.input_size = input_size
 
     def forward(self, samples):
         """ 
@@ -50,28 +51,34 @@ class Pix2Seq(nn.Module):
         image_tensor, targets = samples[0], samples[1]
         if isinstance(image_tensor, (list, torch.Tensor)):
             image_tensor = nested_tensor_from_tensor_list(image_tensor)
-        features, pos = self.backbone(image_tensor)
+        features, poses = self.backbone(image_tensor)
         # print('features.shape: {}, pos.shape: {}'.format(features[0].tensors.shape, pos[0].shape))
         src, mask = features[-1].decompose()
+        tensors = []
+        masks = []
+        for feature in features:
+            tensor, mask = feature.decompose()
+            tensors.append(tensor)
+            masks.append(mask)
         assert mask is not None
-        mask = torch.zeros_like(mask).bool()
+        # mask = torch.zeros_like(mask).bool()
 
         # src = self.input_proj(src)
         if self.training:
-            out = self.forward_train(src, targets, mask, pos[-1])
+            out = self.forward_train(tensors, targets, masks, poses)
         else:
-            out = self.forward_inference(src, mask, pos[-1])
+            out = self.forward_inference(tensors, masks, poses)
 
         out = {'pred_seq_logits': out}
         return out
 
-    def forward_train(self, src, targets, mask, pos):
+    def forward_train(self, src, targets, masks, poses):
         input_seq = self.build_input_seq(targets)
-        similarity = self.transformer(src, input_seq, mask, pos)
+        similarity = self.transformer(src, input_seq, masks, poses)
         return similarity
 
-    def forward_inference(self, src, mask, pos):
-        out_seq = self.transformer(src, -1, mask, pos)
+    def forward_inference(self, src, masks, poses):
+        out_seq = self.transformer(src, -1, masks, poses)
         return out_seq
 
     def build_input_seq(self, targets, max_objects=100):
@@ -87,7 +94,7 @@ class Pix2Seq(nn.Module):
             label_token = label.unsqueeze(1) + self.num_bins + 1
             scaled_box = box * scale_factor
             scaled_box = box_cxcywh_to_xyxy(scaled_box)
-            box_tokens = (scaled_box / 1333 * self.num_bins).floor().long().clamp(min=0, max=self.num_bins)
+            box_tokens = (scaled_box / self.input_size * self.num_bins).floor().long().clamp(min=0, max=self.num_bins)
             input_tokens = torch.cat([box_tokens, label_token], dim=1)
 
             num_objects = input_tokens.shape[0]
@@ -98,7 +105,7 @@ class Pix2Seq(nn.Module):
             random_box_wh = torch.rand(num_noise, 2, device=device)
             random_box_x1y1 = (random_box_x0y0 + random_box_wh).clamp(min=0, max=1)
             random_scaled_box = torch.cat([random_box_x0y0, random_box_x1y1], dim=1) * scale_factor
-            random_box_tokens = (random_scaled_box / 1333 * self.num_bins).floor().long().clamp(min=0, max=self.num_bins)
+            random_box_tokens = (random_scaled_box / self.input_size * self.num_bins).floor().long().clamp(min=0, max=self.num_bins)
             random_tokens = torch.cat([random_box_tokens, random_class], dim=1)
 
             if num_objects > 0:
@@ -109,7 +116,7 @@ class Pix2Seq(nn.Module):
                 jitter_box = box_cxcywh_to_xyxy(jitter_box)
                 jitter_box = (torch.rand((num_noise, 4), device=device) - 0.5) * 2 * 0.2 * jitter_box_wh + jitter_box
                 scaled_jitter_box = jitter_box.clamp(min=0, max=1.0) * scale_factor
-                jitter_box_tokens = (scaled_jitter_box / 1333 * self.num_bins).floor().long().clamp(min=0, max=self.num_bins)
+                jitter_box_tokens = (scaled_jitter_box / self.input_size * self.num_bins).floor().long().clamp(min=0, max=self.num_bins)
                 jitter_tokens = torch.cat([jitter_box_tokens, jitter_class], dim=1)
 
                 fake_tokens = torch.stack([random_tokens, jitter_tokens], dim=1)
@@ -127,7 +134,7 @@ class SetCriterion(nn.Module):
     """
     This class computes the loss for Pix2Seq.
     """
-    def __init__(self, num_classes, weight_dict, eos_coef, num_bins, num_vocal):
+    def __init__(self, num_classes, weight_dict, eos_coef, num_bins, num_vocal, input_size=1333):
         """ Create the criterion.
         Parameters:
             num_classes: number of object categories, omitting the special no-object category
@@ -143,6 +150,7 @@ class SetCriterion(nn.Module):
         empty_weight[-1] = eos_coef
         self.register_buffer('empty_weight', empty_weight)
         self.weight_dict = weight_dict
+        self.input_size = input_size
 
     def build_target_seq(self, targets, max_objects=100):
         device = targets[0]["labels"].device
@@ -156,7 +164,7 @@ class SetCriterion(nn.Module):
             label = label.unsqueeze(1) + self.num_bins + 1
             box = box * torch.stack([w, h, w, h], dim=0)
             box = box_cxcywh_to_xyxy(box)
-            box = (box / 1333 * self.num_bins).floor().long().clamp(min=0, max=self.num_bins)
+            box = (box / self.input_size * self.num_bins).floor().long().clamp(min=0, max=self.num_bins)
             target_tokens = torch.cat([box, label], dim=1).flatten()
 
             end_token = torch.tensor([self.num_vocal - 2], dtype=torch.int64).to(device)
@@ -210,10 +218,11 @@ class SetCriterion(nn.Module):
 
 class PostProcess(nn.Module):
     """ This module converts the model's output into the format expected by the coco api"""
-    def __init__(self, num_bins, num_classes):
+    def __init__(self, num_bins, num_classes, input_size=1333):
         super().__init__()
         self.num_bins = num_bins
         self.num_classes = num_classes
+        self.input_size = input_size
 
     @torch.no_grad()
     def forward(self, outputs, targets):
@@ -250,7 +259,7 @@ class PostProcess(nn.Module):
             pred_boxes_logits = pred_seq_logits[:, :4, :self.num_bins + 1]
             pred_class_logits = pred_seq_logits[:, 4, self.num_bins + 1: self.num_bins + 1 + self.num_classes]
             scores_per_image, labels_per_image = torch.max(pred_class_logits, dim=1)
-            boxes_per_image = pred_boxes_logits.argmax(dim=2) * 1333 / self.num_bins
+            boxes_per_image = pred_boxes_logits.argmax(dim=2) * self.input_size / self.num_bins
             boxes_per_image = boxes_per_image * scale_fct[b_i]
             result = dict()
             result['scores'] = scores_per_image
@@ -291,7 +300,8 @@ def build(args):
         backbone,
         transformer,
         num_classes=num_classes,
-        num_bins=num_bins)
+        num_bins=num_bins,
+        input_size=args.input_size)
 
     weight_dict = {'loss_seq': 1}
     criterion = SetCriterion(
@@ -299,8 +309,9 @@ def build(args):
         weight_dict,
         eos_coef=args.eos_coef,
         num_bins=num_bins,
-        num_vocal=num_vocal)
+        num_vocal=num_vocal,
+        input_size=args.input_size)
     criterion.to(device)
-    postprocessors = {'bbox': PostProcess(num_bins, num_classes)}
+    postprocessors = {'bbox': PostProcess(num_bins, num_classes, args.input_size)}
 
     return model, criterion, postprocessors

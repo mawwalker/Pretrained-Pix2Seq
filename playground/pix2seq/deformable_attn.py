@@ -199,7 +199,7 @@ class DeformableHeadAttention(nn.Module):
                 vgrid_scaled = torch.stack((vgrid_x, vgrid_y), dim=3)
 
                 # B*M, C_v, H, W
-                feat = F.grid_sample(scale_feature, vgrid_scaled, mode='bilinear', padding_mode='zeros')
+                feat = F.grid_sample(scale_feature, vgrid_scaled, mode='bilinear', padding_mode='zeros', align_corners=False)
                 k_features.append(feat)
             # B*M, k, C_v, H, W
             k_features = torch.stack(k_features, dim=1)

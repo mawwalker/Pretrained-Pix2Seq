@@ -25,7 +25,7 @@ def get_args_parser():
     parser.add_argument('--lr', default=1e-3, type=float)
     parser.add_argument('--lr_backbone', default=1e-4, type=float)
     parser.add_argument('--weight_decay', default=0.05, type=float)
-    parser.add_argument('--batch_size', default=2, type=int)
+    parser.add_argument('--batch_size', default=1, type=int)
     parser.add_argument('--epochs', default=300, type=int)
     parser.add_argument('--lr_drop', default=200, type=int)
     parser.add_argument('--clip_max_norm', default=0.1, type=float,
@@ -43,7 +43,7 @@ def get_args_parser():
     parser.add_argument('--pred_eos', action='store_true', help='use eos token instead of predicting 100 objects')
 
     # * Backbone
-    parser.add_argument('--backbone', default='swin', type=str,
+    parser.add_argument('--backbone', default='swin_L', type=str,
                         help="Name of the convolutional backbone to use")
     parser.add_argument('--dilation', action='store_true',
                         help="If true, we replace stride with dilation in the last convolutional block (DC5)")
@@ -71,16 +71,16 @@ def get_args_parser():
 
     # dataset parameters
     parser.add_argument('--dataset_file', default='coco')
-    parser.add_argument('--coco_path', default='./coco', type=str)
+    parser.add_argument('--coco_path', default='./ships', type=str)
     parser.add_argument('--coco_panoptic_path', type=str)
     parser.add_argument('--remove_difficult', action='store_true')
 
-    parser.add_argument('--output_dir', default='./output/ships_v3_debug',
+    parser.add_argument('--output_dir', default='./output/ships_v5_debug',
                         help='path where to save, empty for no saving')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='', help='resume from checkpoint')
+    parser.add_argument('--resume', default='pix2seq_r50_13.pth', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--eval', action='store_true')
@@ -92,9 +92,10 @@ def get_args_parser():
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
     
     parser.add_argument('--num_classes', default=12, type=int, help='max ID of the datasets')
-    parser.add_argument('--swin_path', default='', help='swin transformer Pretrained model path')
-    parser.add_argument('--transfer', action='store_true', help='transfer learning from swin & COCO-pretrained-pix2seq')
+    parser.add_argument('--swin_path', default='weights/swin_large_patch4_window7_224_22k.pth', help='swin transformer Pretrained model path')
+    parser.add_argument('--transfer', default=True, action='store_true', help='transfer learning from swin & COCO-pretrained-pix2seq')
     parser.add_argument('--activation', default='relu', help='transformer activation function')
+    parser.add_argument('--input_size', default=1333, type=int, help='input size of the pix2seq model')
     return parser
 
 
@@ -177,8 +178,8 @@ def main(args):
         
         if args.transfer:
             # Load weights from COCO_pretrained ResNet-Pix2Seq model to train new swinbased Pix2Seq model
-            state_dict = {k:v for k,v in checkpoint['model'].items() if k.startswith('transformer')}
             model_dict = model_without_ddp.state_dict()
+            state_dict = {k:v for k,v in checkpoint['model'].items() if k in model_dict}
             model_dict.update(state_dict)
             model_without_ddp.load_state_dict(model_dict)
         else:

@@ -24,7 +24,7 @@ class Transformer(nn.Module):
     def __init__(self, d_model=512, nhead=8, num_encoder_layers=6,
                  num_decoder_layers=6, dim_feedforward=1024, dropout=0.1,
                  activation="relu", normalize_before=False, num_vocal=2094,
-                 pred_eos=False, scales=4, k=4, last_height=16, last_width=16):
+                 pred_eos=False, scales=1, k=4, last_height=16, last_width=16):
         super().__init__()
         rpe_config = irpe.get_rpe_config(
                         ratio=1.9,
@@ -71,7 +71,7 @@ class Transformer(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def forward(self, src, input_seq, mask, pos_embed):
+    def forward(self, src, input_seq, masks, pos_embeds):
         """
         Args:
             src: shape[B, C, H, W]
@@ -81,22 +81,36 @@ class Transformer(nn.Module):
         """
         # flatten NxCxHxW to HWxNxC
         # bs = src.shape[0]
-        bs, c, h, w = src.shape
+        bs, c, h, w = src[0].shape
+        
+        # B, C H, W -> B, H, W, C
+        for index in range(len(src)):
+            # src[index] = src[index].flatten(2).permute(2, 0, 1)
+            # pos_embeds[index] = pos_embeds[index].flatten(2).permute(2, 0, 1)
+            
+            src[index] = src[index].permute(0, 2, 3, 1)
+            pos_embeds[index] = pos_embeds[index].permute(0, 2, 3, 1)
+            
+        # B, H, W, C
+        ref_points = []
+        for tensor in src:
+            _, height, width, _ = tensor.shape
+            ref_point = generate_ref_points(width=width,
+                                            height=height)
+            ref_point = ref_point.type_as(src[0])
+            # H, W, 2 -> B, H, W, 2
+            ref_point = ref_point.unsqueeze(0).repeat(bs, 1, 1, 1)
+            ref_points.append(ref_point)
 
-        # ref_points = []
-        ref_points = generate_ref_points(width=w,
-                                        height=h)
-        ref_points = ref_points.type_as(src)
-        # H, W, 2 -> B, H, W, 2
-        ref_points = ref_points.unsqueeze(0).repeat(bs, 1, 1, 1)
-        # ref_points.append(ref_point)
-
-        src = src.flatten(2).permute(2, 0, 1)
-        mask = mask.flatten(1)
-        pos_embed = pos_embed.flatten(2).permute(2, 0, 1)
-
-        memory = self.encoder(src, ref_points, src_key_padding_mask=mask, pos=pos_embed, hw=(h, w))
-        pre_kv = [torch.as_tensor([[], []], device=memory.device)
+        # src = src.flatten(2).permute(2, 0, 1)
+        # mask = mask.flatten(1)
+        # pos_embed = pos_embed.flatten(2).permute(2, 0, 1)
+        memory = self.encoder(src, ref_points, src_key_padding_masks=masks, poses=pos_embeds, hw=(h, w))
+        for index in range(len(memory)):
+            memory[index] = memory[index].flatten(1, 2).permute(1, 0, 2)
+            masks[index] = masks[index].flatten(1)
+            pos_embeds[index] = pos_embeds[index].flatten(1, 2).permute(1, 0, 2)
+        pre_kv = [torch.as_tensor([[], []], device=memory[0].device)
                   for _ in range(self.num_decoder_layers)]
 
         if self.training:
@@ -109,24 +123,24 @@ class Transformer(nn.Module):
                 to(input_embed.device)
             hs, pre_kv = self.decoder(
                 input_embed,
-                memory,
-                memory_key_padding_mask=mask,
-                pos=pos_embed,
+                memory[0],
+                memory_key_padding_mask=masks[0],
+                pos=pos_embeds[0],
                 pre_kv_list=pre_kv,
                 self_attn_mask=self_attn_mask)
             pred_seq_logits = self.vocal_classifier(hs.transpose(0, 1))
             return pred_seq_logits
         else:
-            end = torch.zeros(bs).bool().to(memory.device)
-            end_lens = torch.zeros(bs).long().to(memory.device)
+            end = torch.zeros(bs).bool().to(memory[0].device)
+            end_lens = torch.zeros(bs).long().to(memory[0].device)
             input_embed = self.det_embed.weight.unsqueeze(0).repeat(bs, 1, 1).transpose(0, 1)
             pred_seq_logits = []
             for seq_i in range(500):
                 hs, pre_kv = self.decoder(
                     input_embed,
-                    memory,
-                    memory_key_padding_mask=mask,
-                    pos=pos_embed,
+                    memory[0],
+                    memory_key_padding_mask=masks[0],
+                    pos=pos_embeds[0],
                     pre_kv_list=pre_kv)
                 similarity = self.vocal_classifier(hs)
                 pred_seq_logits.append(similarity.transpose(0, 1))
@@ -158,18 +172,20 @@ class TransformerEncoder(nn.Module):
         self.norm = norm
 
     def forward(self, src, ref_points,
-                src_key_padding_mask: Optional[Tensor] = None,
-                pos: Optional[Tensor] = None,
+                src_key_padding_masks: Optional[Tensor] = None,
+                poses: Optional[Tensor] = None,
                 hw=None):
-        output = src
+        outputs = src
 
         for layer in self.layers:
-            output = layer(output, ref_points, src_key_padding_mask=src_key_padding_mask, pos=pos, hw=hw)
+            outputs = layer(outputs, ref_points, src_key_padding_masks=src_key_padding_masks, poses=poses, hw=hw)
 
         if self.norm is not None:
-            output = self.norm(output)
+            for index, output in enumerate(outputs):
+                outputs[index] = self.norm(output)
+            # output = self.norm(output)
 
-        return output
+        return outputs
 
 
 class TransformerDecoder(nn.Module):
@@ -206,21 +222,22 @@ class TransformerEncoderLayer(nn.Module):
                  scales: int,
                  last_feat_height: int,
                  last_feat_width: int,
+                 need_attn: bool = False,
                  dim_feedforward=2048, dropout=0.1,
                  activation="relu", normalize_before=False,
                  rpe_config=None):
         super().__init__()
         # self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
-        self.self_attn = RPEMultiheadAttention(
-            d_model, nhead, dropout=dropout, rpe_config=rpe_config)
-        # self.ms_deformbale_attn = DeformableHeadAttention(h=nhead,
-        #                                                   d_model=d_model,
-        #                                                   k=k,
-        #                                                   scales=scales,
-        #                                                   last_feat_height=last_feat_height,
-        #                                                   last_feat_width=last_feat_width,
-        #                                                   dropout=dropout,
-        #                                                   need_attn=False)
+        # self.self_attn = RPEMultiheadAttention(
+        #     d_model, nhead, dropout=dropout, rpe_config=rpe_config)
+        self.ms_deformbale_attn = DeformableHeadAttention(h=nhead,
+                                                          d_model=d_model,
+                                                          k=k,
+                                                          scales=scales,
+                                                          last_feat_height=last_feat_height,
+                                                          last_feat_width=last_feat_width,
+                                                          dropout=dropout,
+                                                          need_attn=need_attn)
         # Implementation of Feedforward model
         self.linear1 = nn.Linear(d_model, dim_feedforward)
         self.dropout = nn.Dropout(dropout)
@@ -233,49 +250,104 @@ class TransformerEncoderLayer(nn.Module):
 
         self.activation = _get_activation_fn(activation)
         self.normalize_before = normalize_before
+        
+        self.need_attn = need_attn
+        self.attns = []
 
     def with_pos_embed(self, tensor, pos: Optional[Tensor]):
         return tensor if pos is None else tensor + pos
 
     def forward_post(self,
-                     src, ref_points,
-                     src_key_padding_mask: Optional[Tensor] = None,
-                     pos: Optional[Tensor] = None,
+                     src_tensors, ref_points,
+                     src_key_padding_masks: Optional[Tensor] = None,
+                     poses: Optional[Tensor] = None,
                      hw=None):
-        q = k = self.with_pos_embed(src, pos)
-        src2 = self.self_attn(q, k, value=src, key_padding_mask=src_key_padding_mask, hw=hw)[0]
-        # src2, attns = self.ms_deformbale_attn(src,
-        #                                           src_tensors,
-        #                                           ref_point,
-        #                                           query_mask=src_key_padding_mask,
-        #                                           key_masks=src_key_padding_masks)
-        src = src + self.dropout1(src2)
-        src = self.norm1(src)
-        src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
-        src = src + self.dropout2(src2)
-        src = self.norm2(src)
-        return src
 
-    def forward_pre(self, src, ref_points,
-                    src_key_padding_mask: Optional[Tensor] = None,
-                    pos: Optional[Tensor] = None,
+        if src_key_padding_masks is None:
+            src_key_padding_masks = [None] * len(src_tensors)
+
+        if poses is None:
+            poses = [None] * len(src_tensors)
+        # q = k = self.with_pos_embed(src, pos)
+        # src2 = self.self_attn(q, k, value=src, key_padding_mask=src_key_padding_mask, hw=hw)[0]
+        feats = []
+        src_tensors = [self.with_pos_embed(tensor, pos) for tensor, pos in zip(src_tensors, poses)]
+        for src, ref_point, src_key_padding_mask, pos in zip(src_tensors,
+                                                            ref_points,
+                                                            src_key_padding_masks,
+                                                            poses):
+            # src = self.with_pos_embed(src, pos)
+            # print('src_tensors length: {}'.format(len(src_tensors)))
+            src2, attns = self.ms_deformbale_attn(src,
+                                                  src_tensors,
+                                                  ref_point,
+                                                  query_mask=src_key_padding_mask,
+                                                  key_masks=src_key_padding_masks)
+
+            if self.need_attn:
+                self.attns.append(attns)
+
+            src = src + self.dropout1(src2)
+            src = self.norm1(src)
+            src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
+            src = src + self.dropout2(src2)
+            src = self.norm2(src)
+            feats.append(src)
+
+        # src = src + self.dropout1(src2)
+        # src = self.norm1(src)
+        # src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
+        # src = src + self.dropout2(src2)
+        # src = self.norm2(src)
+        return feats
+
+    def forward_pre(self, src_tensors, ref_points,
+                    src_key_padding_masks: Optional[Tensor] = None,
+                    poses: Optional[Tensor] = None,
                     hw=None):
-        src2 = self.norm1(src)
-        q = k = self.with_pos_embed(src2, pos)
-        src2 = self.self_attn(q, k, value=src2, key_padding_mask=src_key_padding_mask, hw=hw)[0]
-        src = src + self.dropout1(src2)
-        src2 = self.norm2(src)
-        src2 = self.linear2(self.dropout(self.activation(self.linear1(src2))))
-        src = src + self.dropout2(src2)
-        return src
+        if src_key_padding_masks is None:
+            src_key_padding_masks = [None] * len(src_tensors)
 
-    def forward(self, src, ref_points,
-                src_key_padding_mask: Optional[Tensor] = None,
-                pos: Optional[Tensor] = None,
+        if poses is None:
+            poses = [None] * len(src_tensors)
+
+        feats = []
+
+        src_tensors = [self.with_pos_embed(tensor, pos) for tensor, pos in zip(src_tensors, poses)]
+        for src, ref_point, src_key_padding_mask, pos in zip(src_tensors,
+                                                             ref_points,
+                                                             src_key_padding_masks,
+                                                             poses):
+            src2 = self.norm1(src, pos)
+            # src2 = self.with_pos_embed(src2, pos)
+            src2, attns = self.ms_deformbale_attn(src2, src_tensors, ref_point, query_mask=src_key_padding_mask)
+
+            if self.need_attn:
+                self.attns.append(attns)
+
+            src = src + self.dropout1(src2)
+            src2 = self.norm2(src)
+
+            src2 = self.linear2(self.dropout(self.activation(self.linear1(src2))))
+            src = src + self.dropout2(src2)
+            feats.append(src)
+        
+        # src2 = self.norm1(src)
+        # q = k = self.with_pos_embed(src2, pos)
+        # src2 = self.self_attn(q, k, value=src2, key_padding_mask=src_key_padding_mask, hw=hw)[0]
+        # src = src + self.dropout1(src2)
+        # src2 = self.norm2(src)
+        # src2 = self.linear2(self.dropout(self.activation(self.linear1(src2))))
+        # src = src + self.dropout2(src2)
+        return feats
+
+    def forward(self, src_tensors, ref_points,
+                src_key_padding_masks: Optional[Tensor] = None,
+                poses: Optional[Tensor] = None,
                 hw=None):
         if self.normalize_before:
-            return self.forward_pre(src, ref_points, src_key_padding_mask, pos, hw=hw)
-        return self.forward_post(src, ref_points, src_key_padding_mask, pos, hw=hw)
+            return self.forward_pre(src_tensors, ref_points, src_key_padding_masks, poses, hw=hw)
+        return self.forward_post(src_tensors, ref_points, src_key_padding_masks, poses, hw=hw)
 
 
 class TransformerDecoderLayer(nn.Module):

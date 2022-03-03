@@ -5,13 +5,11 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: 当前文件",
+            "name": "Python: main.py",
             "type": "python",
             "request": "launch",
             "program": "main.py",
-            "args": ["-m", "torch.distributed.launch",
-                    "--nproc_per_node=2", "--use_env", "main.py",
-                    "--pix2seq_lr", "--large_scale_jitter", "--rand_target"],
+            "args": ["--pix2seq_lr", "--large_scale_jitter", "--rand_target"],
             "console": "integratedTerminal"
         }
     ]
