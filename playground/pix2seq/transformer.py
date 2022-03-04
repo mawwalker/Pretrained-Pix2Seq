@@ -65,6 +65,7 @@ class Transformer(nn.Module):
         self.nhead = nhead
         self.num_decoder_layers = num_decoder_layers
         self.query_ref_point_proj = nn.Linear(d_model, 2)
+        self.ref_vocal_classifier = nn.Linear(2, num_vocal)
 
     def _reset_parameters(self):
         for p in self.parameters():
@@ -133,6 +134,8 @@ class Transformer(nn.Module):
                 pre_kv_list=pre_kv,
                 self_attn_mask=self_attn_mask)
             pred_seq_logits = self.vocal_classifier(hs.transpose(0, 1))
+            query_ref_point = self.ref_vocal_classifier(query_ref_point.transpose(0, 1))
+            pred_seq_logits = pred_seq_logits + query_ref_point
             return pred_seq_logits
         else:
             end = torch.zeros(bs).bool().to(memory[0].device)
@@ -168,6 +171,8 @@ class Transformer(nn.Module):
                 end_lens = end_lens.fill_(500)
             pred_seq_logits = torch.cat(pred_seq_logits, dim=1)
             pred_seq_logits = [psl[:end_idx] for end_idx, psl in zip(end_lens, pred_seq_logits)]
+            query_ref_point = self.ref_vocal_classifier(query_ref_point.transpose(0, 1))
+            pred_seq_logits = pred_seq_logits + query_ref_point
             return pred_seq_logits
 
 
