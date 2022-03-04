@@ -88,12 +88,12 @@ class BackboneBase(nn.Module):
         # self.input_proj2 = nn.Sequential(
         #             nn.Conv2d(num_channels//2, hidden_dim, kernel_size=(1, 1)),
         #             nn.GroupNorm(32, hidden_dim))
-        # self.input_proj3 = nn.Sequential(
-        #             nn.Conv2d(num_channels, hidden_dim, kernel_size=(1, 1)),
-        #             nn.GroupNorm(32, hidden_dim))
-        self.input_proj4 = nn.Sequential(
-                    nn.Conv2d(num_channels, hidden_dim, kernel_size=(3, 3), stride=2),
+        self.input_proj3 = nn.Sequential(
+                    nn.Conv2d(num_channels, hidden_dim, kernel_size=(1, 1)),
                     nn.GroupNorm(32, hidden_dim))
+        # self.input_proj4 = nn.Sequential(
+        #             nn.Conv2d(num_channels, hidden_dim, kernel_size=(3, 3), stride=2),
+        #             nn.GroupNorm(32, hidden_dim))
 
     def forward(self, tensor_list: NestedTensor):
         xx = self.body(tensor_list.tensors)
@@ -112,7 +112,7 @@ class BackboneBase(nn.Module):
         assert m is not None
         out: Dict[str, NestedTensor] = {}
         for name, x in xs.items():
-            scale_map = self.input_proj4(x)
+            scale_map = self.input_proj3(x)
             mask = F.interpolate(m[None].float(), size=scale_map.shape[-2:]).to(torch.bool)[0]
             out[name] = NestedTensor(scale_map, mask)
             
