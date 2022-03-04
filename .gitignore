@@ -27,4 +27,5 @@ tags
 *.log
 .ipynb_checkpoints/
 
-screenlog.0
+screenlog.*
+result.jpg

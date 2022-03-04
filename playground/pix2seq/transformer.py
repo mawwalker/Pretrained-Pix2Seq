@@ -134,6 +134,7 @@ class Transformer(nn.Module):
                 pre_kv_list=pre_kv,
                 self_attn_mask=self_attn_mask)
             pred_seq_logits = self.vocal_classifier(hs.transpose(0, 1))
+            query_ref_point = - torch.log(1 / (query_ref_point + 1e-10) - 1 + 1e-10)
             query_ref_point = self.ref_vocal_classifier(query_ref_point.transpose(0, 1))
             pred_seq_logits = pred_seq_logits + query_ref_point
             return pred_seq_logits
@@ -170,9 +171,10 @@ class Transformer(nn.Module):
             if not self.pred_eos:
                 end_lens = end_lens.fill_(500)
             pred_seq_logits = torch.cat(pred_seq_logits, dim=1)
-            pred_seq_logits = [psl[:end_idx] for end_idx, psl in zip(end_lens, pred_seq_logits)]
+            query_ref_point = - torch.log(1 / (query_ref_point + 1e-10) - 1 + 1e-10)
             query_ref_point = self.ref_vocal_classifier(query_ref_point.transpose(0, 1))
             pred_seq_logits = pred_seq_logits + query_ref_point
+            pred_seq_logits = [psl[:end_idx] for end_idx, psl in zip(end_lens, pred_seq_logits)]
             return pred_seq_logits
 
 
