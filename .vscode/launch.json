@@ -5,11 +5,23 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Python: 当前文件",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
             "name": "Python: main.py",
             "type": "python",
             "request": "launch",
             "program": "main.py",
-            "args": ["--pix2seq_lr", "--large_scale_jitter", "--rand_target"],
+            "args": [
+                "--pix2seq_lr",
+                "--large_scale_jitter",
+                "--rand_target"
+            ],
             "console": "integratedTerminal"
         }
     ]
