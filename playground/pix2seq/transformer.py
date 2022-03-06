@@ -18,6 +18,7 @@ from .attention_layer import Attention
 # Self-attention with 2D relative position encoding
 from .rpe_attention import RPEMultiheadAttention, irpe
 from .deformable_attn import DeformableHeadAttention, generate_ref_points
+from .linear_multihead_attention import LinearMultiheadAttention
 
 class Transformer(nn.Module):
 
@@ -103,6 +104,8 @@ class Transformer(nn.Module):
         # mask = mask.flatten(1)
         # pos_embed = pos_embed.flatten(2).permute(2, 0, 1)
         memory = self.encoder(src, ref_points, src_key_padding_masks=masks, poses=pos_embeds, hw=(h, w))
+        
+        # from deformable to default multihead-attention
         for index in range(len(memory)):
             memory[index] = memory[index].flatten(1, 2).permute(1, 0, 2)
             masks[index] = masks[index].flatten(1)
@@ -356,7 +359,8 @@ class TransformerDecoderLayer(nn.Module):
                  activation="relu", normalize_before=False):
         super().__init__()
         self.self_attn = Attention(d_model, nhead, dropout=dropout)
-        self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        # self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        self.multihead_attn = LinearMultiheadAttention(d_model, nhead, dropout=dropout, seq_len=1764, proj_k=64)
         # Implementation of Feedforward model
         self.linear1 = nn.Linear(d_model, dim_feedforward)
         self.dropout = nn.Dropout(dropout)

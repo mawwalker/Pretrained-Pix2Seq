@@ -10,4 +10,4 @@ python -m torch.distributed.launch --nproc_per_node=$GPUS --use_env main.py \
     --batch_size 4 \
     --coco_path ./coco \
     --num_classes 90 \
-    --output_dir ./output/coco_v5
+    --output_dir ./output/coco_v6
