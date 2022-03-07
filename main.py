@@ -22,8 +22,8 @@ from timm.utils import NativeScaler
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
-    parser.add_argument('--lr', default=1e-2, type=float)
-    parser.add_argument('--lr_backbone', default=1e-3, type=float)
+    parser.add_argument('--lr', default=1e-3, type=float)
+    parser.add_argument('--lr_backbone', default=1e-4, type=float)
     parser.add_argument('--weight_decay', default=0.05, type=float)
     parser.add_argument('--batch_size', default=2, type=int)
     parser.add_argument('--epochs', default=300, type=int)
@@ -75,7 +75,7 @@ def get_args_parser():
     parser.add_argument('--coco_panoptic_path', type=str)
     parser.add_argument('--remove_difficult', action='store_true')
 
-    parser.add_argument('--output_dir', default='./output/ships_v6_debug',
+    parser.add_argument('--output_dir', default='./output/ships_v5_debug',
                         help='path where to save, empty for no saving')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
