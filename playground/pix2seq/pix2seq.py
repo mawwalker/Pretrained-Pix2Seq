@@ -12,7 +12,7 @@ from util.misc import (NestedTensor, nested_tensor_from_tensor_list,
 
 from .backbone import build_backbone
 from .transformer import build_transformer
-from util.box_ops import box_cxcywh_to_xyxy
+from util.box_ops import box_cxcywh_to_xyxy, get_wh
 
 
 class Pix2Seq(nn.Module):
@@ -88,11 +88,11 @@ class Pix2Seq(nn.Module):
             label = target["labels"]
             img_size = target["size"]
             h, w = img_size[0], img_size[1]
-            scale_factor = torch.stack([w, h, w, h], dim=0)
+            scale_factor = torch.stack([w, h, w, h, w, h, w, h], dim=0)
 
             label_token = label.unsqueeze(1) + self.num_bins + 1
             scaled_box = box * scale_factor
-            scaled_box = box_cxcywh_to_xyxy(scaled_box)
+            # scaled_box = box_cxcywh_to_xyxy(scaled_box)
             box_tokens = (scaled_box / self.input_size * self.num_bins).floor().long().clamp(min=0, max=self.num_bins)
             input_tokens = torch.cat([box_tokens, label_token], dim=1)
 
@@ -100,10 +100,12 @@ class Pix2Seq(nn.Module):
             num_noise = max_objects - num_objects
 
             random_class = torch.randint(0, self.num_classes, (num_noise, 1), device=device) + self.num_bins + 1
-            random_box_x0y0 = torch.rand(num_noise, 2, device=device)
-            random_box_wh = torch.rand(num_noise, 2, device=device)
-            random_box_x1y1 = (random_box_x0y0 + random_box_wh).clamp(min=0, max=1)
-            random_scaled_box = torch.cat([random_box_x0y0, random_box_x1y1], dim=1) * scale_factor
+            random_box_x0y0 = torch.rand(num_noise, 2, device=device).clamp(min=0, max=1)
+            random_box_x1y1 = torch.rand(num_noise, 2, device=device).clamp(min=0, max=1)
+            random_box_x2y2 = torch.rand(num_noise, 2, device=device).clamp(min=0, max=1)
+            random_box_x3y3 = torch.rand(num_noise, 2, device=device).clamp(min=0, max=1)
+            # random_box_x1y1 = (random_box_x0y0 + random_box_wh).clamp(min=0, max=1)
+            random_scaled_box = torch.cat([random_box_x0y0, random_box_x1y1, random_box_x2y2, random_box_x3y3], dim=1) * scale_factor
             random_box_tokens = (random_scaled_box / self.input_size * self.num_bins).floor().long().clamp(min=0, max=self.num_bins)
             random_tokens = torch.cat([random_box_tokens, random_class], dim=1)
 
@@ -111,9 +113,10 @@ class Pix2Seq(nn.Module):
                 jitter_box_idx = torch.randint(0, num_objects, (num_noise,), device=device)
                 jitter_class = label_token[jitter_box_idx]
                 jitter_box = box[jitter_box_idx]
-                jitter_box_wh = jitter_box[:, 2:].repeat(1, 2)
-                jitter_box = box_cxcywh_to_xyxy(jitter_box)
-                jitter_box = (torch.rand((num_noise, 4), device=device) - 0.5) * 2 * 0.2 * jitter_box_wh + jitter_box
+                # jitter_box_wh = jitter_box[:, 2:].repeat(1, 2)
+                jitter_box_wh = get_wh(jitter_box)
+                # jitter_box = box_cxcywh_to_xyxy(jitter_box)
+                jitter_box = (torch.rand((num_noise, 8), device=device) - 0.5) * 2 * 0.2 * jitter_box_wh + jitter_box
                 scaled_jitter_box = jitter_box.clamp(min=0, max=1.0) * scale_factor
                 jitter_box_tokens = (scaled_jitter_box / self.input_size * self.num_bins).floor().long().clamp(min=0, max=self.num_bins)
                 jitter_tokens = torch.cat([jitter_box_tokens, jitter_class], dim=1)
@@ -161,18 +164,18 @@ class SetCriterion(nn.Module):
             h, w = img_size[0], img_size[1]
 
             label = label.unsqueeze(1) + self.num_bins + 1
-            box = box * torch.stack([w, h, w, h], dim=0)
-            box = box_cxcywh_to_xyxy(box)
+            box = box * torch.stack([w, h, w, h, w, h, w, h], dim=0)
+            # box = box_cxcywh_to_xyxy(box)
             box = (box / self.input_size * self.num_bins).floor().long().clamp(min=0, max=self.num_bins)
             target_tokens = torch.cat([box, label], dim=1).flatten()
 
             end_token = torch.tensor([self.num_vocal - 2], dtype=torch.int64).to(device)
 
             num_noise = max_objects - len(label)
-            fake_target_tokens = torch.zeros((num_noise, 5), dtype=torch.int64).to(device)
-            fake_target_tokens[:, :3] = -100
-            fake_target_tokens[:, 3] = self.num_vocal - 1  # noise class
-            fake_target_tokens[:, 4] = self.num_vocal - 2  # eos
+            fake_target_tokens = torch.zeros((num_noise, 9), dtype=torch.int64).to(device)
+            fake_target_tokens[:, :7] = -100
+            fake_target_tokens[:, 7] = self.num_vocal - 1  # noise class
+            fake_target_tokens[:, 8] = self.num_vocal - 2  # eos
             fake_target_tokens = fake_target_tokens.flatten()
 
             target_seq = torch.cat([target_tokens, end_token, fake_target_tokens], dim=0)
@@ -244,19 +247,21 @@ class PostProcess(nn.Module):
         inp_img_h, inp_img_w = input_img_sizes.unbind(1)
         scale_fct = torch.stack(
             [ori_img_w / inp_img_w, ori_img_h / inp_img_h,
+             ori_img_w / inp_img_w, ori_img_h / inp_img_h,
+             ori_img_w / inp_img_w, ori_img_h / inp_img_h,
              ori_img_w / inp_img_w, ori_img_h / inp_img_h], dim=1).unsqueeze(1)
 
         results = []
         for b_i, pred_seq_logits in enumerate(out_seq_logits):
             seq_len = pred_seq_logits.shape[0]
-            if seq_len < 5:
+            if seq_len < 9:
                 results.append(dict())
                 continue
             pred_seq_logits = pred_seq_logits.softmax(dim=-1)
-            num_objects = seq_len // 5
-            pred_seq_logits = pred_seq_logits[:int(num_objects * 5)].reshape(num_objects, 5, -1)
-            pred_boxes_logits = pred_seq_logits[:, :4, :self.num_bins + 1]
-            pred_class_logits = pred_seq_logits[:, 4, self.num_bins + 1: self.num_bins + 1 + self.num_classes]
+            num_objects = seq_len // 9
+            pred_seq_logits = pred_seq_logits[:int(num_objects * 9)].reshape(num_objects, 9, -1)
+            pred_boxes_logits = pred_seq_logits[:, :8, :self.num_bins + 1]
+            pred_class_logits = pred_seq_logits[:, 8, self.num_bins + 1: self.num_bins + 1 + self.num_classes]
             scores_per_image, labels_per_image = torch.max(pred_class_logits, dim=1)
             boxes_per_image = pred_boxes_logits.argmax(dim=2) * self.input_size / self.num_bins
             boxes_per_image = boxes_per_image * scale_fct[b_i]

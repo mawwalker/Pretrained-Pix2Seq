@@ -19,6 +19,11 @@ def box_xyxy_to_cxcywh(x):
          (x1 - x0), (y1 - y0)]
     return torch.stack(b, dim=-1)
 
+def get_wh(x):
+    x_ = x[..., ::2]
+    y_ = x[..., 1::2]
+    b = [x_.max(1)[0] - x_.min(1)[0], y_.max(1)[0] - y_.min(1)[0]]
+    return torch.stack(b, dim=-1).repeat(1, 4)
 
 # modified from torchvision to also return the union
 def box_iou(boxes1, boxes2):

@@ -133,7 +133,7 @@ class Transformer(nn.Module):
             end_lens = torch.zeros(bs).long().to(memory[0].device)
             input_embed = self.det_embed.weight.unsqueeze(0).repeat(bs, 1, 1).transpose(0, 1)
             pred_seq_logits = []
-            for seq_i in range(500):
+            for seq_i in range(900):
                 hs, pre_kv = self.decoder(
                     input_embed,
                     memory[0],
@@ -155,7 +155,7 @@ class Transformer(nn.Module):
                 input_embed = self.vocal_embed(pred_token)
 
             if not self.pred_eos:
-                end_lens = end_lens.fill_(500)
+                end_lens = end_lens.fill_(900)
             pred_seq_logits = torch.cat(pred_seq_logits, dim=1)
             pred_seq_logits = [psl[:end_idx] for end_idx, psl in zip(end_lens, pred_seq_logits)]
             return pred_seq_logits

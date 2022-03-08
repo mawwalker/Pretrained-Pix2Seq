@@ -78,7 +78,10 @@ def hflip(image, target):
     target = target.copy()
     if "boxes" in target:
         boxes = target["boxes"]
-        boxes = boxes[:, [2, 1, 0, 3]] * torch.as_tensor([-1, 1, -1, 1]) + torch.as_tensor([w, 0, w, 0])
+        # boxes = boxes[:, [2, 1, 0, 3]] * torch.as_tensor([-1, 1, -1, 1]) + torch.as_tensor([w, 0, w, 0])
+        boxes = boxes[:, [2, 3, 0, 1, 6, 7, 4, 5]] * \
+            torch.as_tensor([-1, 1, -1, 1, -1, 1, -1, 1]) + \
+            torch.as_tensor([w, 0, w, 0, w, 0, w, 0])
         target["boxes"] = boxes
 
     if "polygons" in target:
@@ -280,8 +283,8 @@ class Normalize(object):
         h, w = target["size"][0], target["size"][1]
         if "boxes" in target:
             boxes = target["boxes"]
-            boxes = box_xyxy_to_cxcywh(boxes)
-            boxes = boxes / torch.tensor([w, h, w, h], dtype=torch.float32)
+            # boxes = box_xyxy_to_cxcywh(boxes)
+            boxes = boxes / torch.tensor([w, h, w, h, w, h, w, h], dtype=torch.float32)
             target["boxes"] = boxes
         if "polygons" in target:
             polygons = target["polygons"]
@@ -330,7 +333,7 @@ class LargeScaleJitter(object):
 
         if "boxes" in target:
             boxes = target["boxes"]
-            scaled_boxes = boxes * torch.as_tensor([ratio_width, ratio_height, ratio_width, ratio_height])
+            scaled_boxes = boxes * torch.as_tensor([ratio_width, ratio_height, ratio_width, ratio_height, ratio_width, ratio_height, ratio_width, ratio_height])
             target["boxes"] = scaled_boxes
 
         if "area" in target:
@@ -355,11 +358,11 @@ class LargeScaleJitter(object):
         if "boxes" in target:
             boxes = target["boxes"]
             max_size = torch.as_tensor([w, h], dtype=torch.float32)
-            cropped_boxes = boxes - torch.as_tensor([j, i, j, i])
-            cropped_boxes = torch.min(cropped_boxes.reshape(-1, 2, 2), max_size)
+            cropped_boxes = boxes - torch.as_tensor([j, i, j, i, j, i, j, i])
+            cropped_boxes = torch.min(cropped_boxes.reshape(-1, 4, 2), max_size)
             cropped_boxes = cropped_boxes.clamp(min=0)
-            area = (cropped_boxes[:, 1, :] - cropped_boxes[:, 0, :]).prod(dim=1)
-            target["boxes"] = cropped_boxes.reshape(-1, 4)
+            area = (cropped_boxes[:, 2, :] - cropped_boxes[:, 0, :]).prod(dim=1)
+            target["boxes"] = cropped_boxes.reshape(-1, 8)
             target["area"] = area
             fields.append("boxes")
 
@@ -369,17 +372,17 @@ class LargeScaleJitter(object):
             fields.append("masks")
 
         # remove elements for which the boxes or masks that have zero area
-        if "boxes" in target or "masks" in target:
-            # favor boxes selection when defining which elements to keep
-            # this is compatible with previous implementation
-            if "boxes" in target:
-                cropped_boxes = target['boxes'].reshape(-1, 2, 2)
-                keep = torch.all(cropped_boxes[:, 1, :] > cropped_boxes[:, 0, :], dim=1)
-            else:
-                keep = target['masks'].flatten(1).any(1)
+        # if "boxes" in target or "masks" in target:
+        #     # favor boxes selection when defining which elements to keep
+        #     # this is compatible with previous implementation
+        #     if "boxes" in target:
+        #         cropped_boxes = target['boxes'].reshape(-1, 4, 2)
+        #         keep = torch.all(cropped_boxes[:, 1, :] > cropped_boxes[:, 0, :], dim=1)
+        #     else:
+        #         keep = target['masks'].flatten(1).any(1)
 
-            for field in fields:
-                target[field] = target[field][keep]
+        #     for field in fields:
+        #         target[field] = target[field][keep]
         return target
 
     def pad_target(self, padding, target):

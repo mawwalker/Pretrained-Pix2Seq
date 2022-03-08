@@ -12,12 +12,11 @@ import copy
 import numpy as np
 import torch
 
-from pycocotools.cocoeval import COCOeval
-from pycocotools.coco import COCO
-import pycocotools.mask as mask_util
+from .pycocotools.cocoeval import COCOeval
+from .pycocotools.coco import COCO
+from .pycocotools import mask as mask_util
 
 from util.misc import all_gather
-
 
 class CocoEvaluator(object):
     def __init__(self, coco_gt, iou_types):
@@ -83,7 +82,8 @@ class CocoEvaluator(object):
                 continue
 
             boxes = prediction["boxes"]
-            boxes = convert_to_xywh(boxes).tolist()
+            # boxes = convert_to_xywh(boxes).tolist()
+            boxes = boxes.tolist()
             scores = prediction["scores"].tolist()
             labels = prediction["labels"].tolist()
 
@@ -251,7 +251,6 @@ def evaluate(self):
     # toc = time.time()
     # print('DONE (t={:0.2f}s).'.format(toc-tic))
     return p.imgIds, evalImgs
-
 #################################################################
 # end of straight copy from pycocotools, just removing the prints
 #################################################################

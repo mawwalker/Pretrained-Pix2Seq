@@ -71,8 +71,9 @@ class ConvertCocoPolysToMask(object):
 
         boxes = [obj["bbox"] for obj in anno]
         # guard against no boxes via resizing
-        boxes = torch.as_tensor(boxes, dtype=torch.float32).reshape(-1, 4)
-        boxes[:, 2:] += boxes[:, :2]
+        boxes = torch.as_tensor(boxes, dtype=torch.float32).reshape(-1, 8)
+        # w, h, to x, y
+        # boxes[:, 2:] += boxes[:, :2]
         boxes[:, 0::2].clamp_(min=0, max=w)
         boxes[:, 1::2].clamp_(min=0, max=h)
 
@@ -91,13 +92,13 @@ class ConvertCocoPolysToMask(object):
             if num_keypoints:
                 keypoints = keypoints.view(num_keypoints, -1, 3)
 
-        keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
-        boxes = boxes[keep]
-        classes = classes[keep]
-        if self.return_masks:
-            masks = masks[keep]
-        if keypoints is not None:
-            keypoints = keypoints[keep]
+        # keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
+        # boxes = boxes[keep]
+        # classes = classes[keep]
+        # if self.return_masks:
+        #     masks = masks[keep]
+        # if keypoints is not None:
+        #     keypoints = keypoints[keep]
 
         target = {}
         target["boxes"] = boxes
@@ -120,8 +121,10 @@ class ConvertCocoPolysToMask(object):
         # for conversion to coco api
         area = torch.tensor([obj["area"] for obj in anno])
         iscrowd = torch.tensor([obj["iscrowd"] if "iscrowd" in obj else 0 for obj in anno])
-        target["area"] = area[keep]
-        target["iscrowd"] = iscrowd[keep]
+        # target["area"] = area[keep]
+        # target["iscrowd"] = iscrowd[keep]
+        target["area"] = area
+        target["iscrowd"] = iscrowd
 
         target["orig_size"] = torch.as_tensor([int(h), int(w)])
         target["size"] = torch.as_tensor([int(h), int(w)])
