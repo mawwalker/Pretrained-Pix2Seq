@@ -13,6 +13,7 @@ from util.misc import (NestedTensor, nested_tensor_from_tensor_list,
 from .backbone import build_backbone
 from .transformer import build_transformer
 from util.box_ops import box_cxcywh_to_xyxy, get_wh
+from playground.box_iou_rotated_diff.box_iou_rotated_diff import box_iou_rotated_poly
 
 
 class Pix2Seq(nn.Module):
@@ -109,7 +110,7 @@ class Pix2Seq(nn.Module):
             random_box_tokens = (random_scaled_box / self.input_size * self.num_bins).floor().long().clamp(min=0, max=self.num_bins)
             random_tokens = torch.cat([random_box_tokens, random_class], dim=1)
 
-            if num_objects > 0:
+            if num_objects > 0 and num_noise > 0:
                 jitter_box_idx = torch.randint(0, num_objects, (num_noise,), device=device)
                 jitter_class = label_token[jitter_box_idx]
                 jitter_box = box[jitter_box_idx]
@@ -130,6 +131,25 @@ class Pix2Seq(nn.Module):
             input_seq = torch.cat([input_tokens, fake_tokens], dim=0).flatten()
             input_seq_list.append(input_seq)
         return torch.stack(input_seq_list, dim=0)
+
+
+class IoULoss(nn.Module):
+    def __init__(self, postprocessors, weight=None, size_average=True):
+        super(IoULoss, self).__init__()
+        self.postprocessors = postprocessors
+
+    def forward(self, outputs, targets):        
+        det_boxes = [output['boxes'] for output in self.postprocessors['bbox'](outputs, targets)]
+        gt_boxes = [target['boxes'] * torch.stack([target["size"][1], target["size"][0], 
+                                                   target["size"][1], target["size"][0], 
+                                                   target["size"][1], target["size"][0], 
+                                                   target["size"][1], target["size"][0]], dim=0)
+                    for target in targets]
+        IoUs = [torch.mean(box_iou_rotated_poly(det_boxes[bs][:gt_boxes[bs].shape[0], :].reshape(-1, 4, 2),
+                                                gt_boxes[bs].reshape(-1, 4, 2))[2])
+                for bs in range(len(gt_boxes))]
+        # IoU_loss = torch.sum((torch.stack(IoUs)))
+        return torch.mean((torch.stack(IoUs)))
 
 
 class SetCriterion(nn.Module):
@@ -153,6 +173,8 @@ class SetCriterion(nn.Module):
         self.register_buffer('empty_weight', empty_weight)
         self.weight_dict = weight_dict
         self.input_size = input_size
+        self.postprocessors = {'bbox': PostProcess(num_bins, num_classes, input_size)}
+        self.iou_loss_M = IoULoss(self.postprocessors)
 
     def build_target_seq(self, targets, max_objects=100):
         device = targets[0]["labels"].device
@@ -212,9 +234,11 @@ class SetCriterion(nn.Module):
 
         loss_seq = F.cross_entropy(pred_seq_logits, target_seq, weight=self.empty_weight, reduction='sum') / num_pos
 
+        iou_loss = self.iou_loss_M(outputs, targets)
         # Compute all the requested losses
         losses = dict()
         losses["loss_seq"] = loss_seq
+        losses['iou_loss'] = iou_loss
         return losses
 
 
@@ -307,7 +331,9 @@ def build(args):
         num_bins=num_bins,
         input_size=args.input_size)
 
-    weight_dict = {'loss_seq': 1}
+    # weight_dict = {'loss_seq': 1, 'mse': 1, 'iou_loss': 1}
+    weight_dict = {'loss_seq': 1, 'iou_loss': 1}
+    # weight_dict = {'loss_seq': 1}
     criterion = SetCriterion(
         num_classes,
         weight_dict,

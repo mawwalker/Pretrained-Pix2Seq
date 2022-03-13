@@ -7,6 +7,8 @@ from collections import defaultdict
 import datasets.pycocotools.mask as maskUtils
 import copy
 from shapely.geometry import Polygon
+import torch
+import shapely
 
 class COCOeval:
     # Interface for evaluating detection on the Microsoft COCO dataset.
@@ -542,8 +544,10 @@ def intersection(p, g):
     for det in p:
         iou = []
         for gt in g:
-            det = np.asarray(det)
-            gt = np.asarray((gt))
+            if not torch.is_tensor(det):
+                det = np.asarray(det)
+            if not torch.is_tensor(gt):
+                gt = np.asarray((gt))
             gt1 = Polygon(gt.reshape((4, 2)))
             det1 = Polygon(det.reshape((4, 2)))
             if not gt1.is_valid or not det1.is_valid:

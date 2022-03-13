@@ -71,27 +71,27 @@ def get_args_parser():
 
     # dataset parameters
     parser.add_argument('--dataset_file', default='coco')
-    parser.add_argument('--coco_path', default='./coco128', type=str)
+    parser.add_argument('--coco_path', default='./HRSC', type=str)
     parser.add_argument('--coco_panoptic_path', type=str)
     parser.add_argument('--remove_difficult', action='store_true')
 
-    parser.add_argument('--output_dir', default='./output/ships_v6_debug',
+    parser.add_argument('--output_dir', default='./output/HRSC_v6_debug',
                         help='path where to save, empty for no saving')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='coco_ap370.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='./pix2seq_swin_33_rotate.pth', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--eval', default=False, action='store_true')
     parser.add_argument('--num_workers', default=2, type=int)
 
     # distributed training parameters
-    parser.add_argument('--world_size', default=1, type=int,
+    parser.add_argument('--world_size', default=2, type=int,
                         help='number of distributed processes')
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
     
-    parser.add_argument('--num_classes', default=90, type=int, help='max ID of the datasets')
+    parser.add_argument('--num_classes', default=32, type=int, help='max ID of the datasets')
     parser.add_argument('--swin_path', default='weights/swin_large_patch4_window7_224_22k.pth', help='swin transformer Pretrained model path')
     parser.add_argument('--transfer', default=True, action='store_true', help='transfer learning from swin & COCO-pretrained-pix2seq')
     parser.add_argument('--activation', default='relu', help='transformer activation function')

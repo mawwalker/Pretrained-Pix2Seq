@@ -1,7 +1,6 @@
 #pragma once
 #include <ATen/cuda/CUDAContext.h>
 #include <torch/extension.h>
-#include <c10/cuda/CUDAGuard.h>
 
 #define CHECK_CUDA(x)                                           \
     do {                                                        \
