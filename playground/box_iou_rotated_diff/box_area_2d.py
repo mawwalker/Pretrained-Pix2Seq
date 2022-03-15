@@ -26,11 +26,11 @@ def get_intersection_points(polys1: torch.Tensor, polys2: torch.Tensor):
     """
     # build edges from corners
     line1 = torch.cat([polys1, polys1[..., [1, 2, 3, 0], :]],
-                      dim=3)  # n, 4, 4: Box, edge, point
+                      dim=2)  # n, 4, 4: Box, edge, point
     line2 = torch.cat([polys2, polys2[..., [1, 2, 3, 0], :]], dim=2)
     # duplicate data to pair each edges from the boxes
     # (n, 4, 4) -> (n, 4, 4, 4) : Box, edge1, edge2, point
-    line1_ext = line1.unsqueeze(3).repeat([1, 1, 1, 4, 1])
+    line1_ext = line1.unsqueeze(2).repeat([1, 1, 4, 1])
     line2_ext = line2.unsqueeze(1).repeat([1, 4, 1, 1])
     x1 = line1_ext[..., 0]
     y1 = line1_ext[..., 1]
@@ -108,12 +108,11 @@ def build_vertices(polys1: torch.Tensor, polys2: torch.Tensor,
     # NOTE: inter has elements equals zero and has zeros gradient (masked by multiplying with 0).
     # can be used as trick
     n = polys1.size(0)
-    m = polys2.size(0)
     # (n, 4+4+16, 2)
-    vertices = torch.cat([polys1.repeat(1, m, 1, 1), polys2.unsqueeze(0).repeat(n, 1, 1, 1), inters.view(
-        [n, m, 16, 2])], dim=2)
+    vertices = torch.cat([polys1, polys2, inters.view(
+        [n, 16, 2])], dim=1)
     # Bool (n, 4+4+16)
-    mask = torch.cat([c1_in_2, c2_in_1, mask_inter.view([n, m, 16])], dim=2)
+    mask = torch.cat([c1_in_2, c2_in_1, mask_inter.view([n, 16])], dim=1)
     return vertices, mask
 
 
@@ -138,19 +137,12 @@ def sort_indices(vertices: torch.Tensor, mask: torch.Tensor):
     vertices = vertices.unsqueeze(0)
     mask = mask.unsqueeze(0)
 
-    num_valid = torch.sum(mask.int(), dim=3).int()      # (B, N)
-    mean = torch.sum(vertices * mask.float().unsqueeze(-1), dim=3,
+    num_valid = torch.sum(mask.int(), dim=2).int()      # (B, N)
+    mean = torch.sum(vertices * mask.float().unsqueeze(-1), dim=2,
                      keepdim=True) / num_valid.unsqueeze(-1).unsqueeze(-1)
     # normalization makes sorting easier
     vertices_normalized = vertices - mean
-    n = vertices_normalized.size(1)
-    m = vertices_normalized.size(2)
-    sorted_vertices = []
-    for i in range(n):
-        sorted_vertices.append(sort_vertices_forward(vertices_normalized[:, i, ...],
-                    mask[:, i, ...], num_valid).squeeze(0).long())
-    return torch.stack(sorted_vertices)
-    # return sort_vertices_forward(vertices_normalized, mask, num_valid).squeeze(0).long()
+    return sort_vertices_forward(vertices_normalized, mask, num_valid).squeeze(0).long()
 
 
 def calculate_area(idx_sorted: torch.Tensor, vertices: torch.Tensor):
@@ -164,16 +156,16 @@ def calculate_area(idx_sorted: torch.Tensor, vertices: torch.Tensor):
         area: (n), area of intersection
         selected: (n, 9, 2), vertices of polygon with zero padding 
     """
-    idx_ext = idx_sorted.unsqueeze(-1).repeat([1, 1, 1, 2])
-    selected = torch.gather(vertices, 2, idx_ext)
+    idx_ext = idx_sorted.unsqueeze(-1).repeat([1, 1, 2])
+    selected = torch.gather(vertices, 1, idx_ext)
     total = selected[..., 0:-1, 0]*selected[..., 1:, 1] - \
         selected[..., 0:-1, 1]*selected[..., 1:, 0]
-    total = torch.sum(total, dim=2)
+    total = torch.sum(total, dim=1)
     area = torch.abs(total) / 2
     return area, selected
 
 
-def oriented_box_intersection_2d(polys1: torch.Tensor, polys2: torch.Tensor):
+def oriented_box_area_2d(polys1: torch.Tensor, polys2: torch.Tensor):
     """calculate intersection area of 2d rectangles 
 
     Args:

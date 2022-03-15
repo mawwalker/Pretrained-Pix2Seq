@@ -4,6 +4,7 @@ Most of the code is adapted from https://github.com/lilanxiao/Rotated_IoU
 """
 import torch
 from .box_intersection_2d import oriented_box_intersection_2d
+from .box_area_2d import oriented_box_area_2d
 
 
 def rotated_box_to_poly(rotated_boxes: torch.Tensor):
@@ -80,16 +81,18 @@ def box_iou_rotated_poly(polys1: torch.Tensor, polys2: torch.Tensor, iou_only: b
         U (torch.Tensor): (n) area1 + area2 - inter_area
     """
     # calculate insection areas
-    inter_area, _ = oriented_box_intersection_2d(polys1, polys2)
-    area1, _ = oriented_box_intersection_2d(polys1, polys1)
-    area2, _ = oriented_box_intersection_2d(polys2, polys2)
-    xmin = torch.cat([polys1[..., 0], polys2[..., 0]], dim=-1).min(-1)[0]
-    xmax = torch.cat([polys1[..., 0], polys2[..., 0]], dim=-1).max(-1)[0]
-    ymin = torch.cat([polys1[..., 1], polys2[..., 1]], dim=-1).min(-1)[0]
-    ymax = torch.cat([polys1[..., 1], polys2[..., 1]], dim=-1).max(-1)[0]
+    inter_area, _ = oriented_box_intersection_2d(polys1.unsqueeze(1), polys2)
+    area1, _ = oriented_box_area_2d(polys1, polys1)
+    area2, _ = oriented_box_area_2d(polys2, polys2)
+    n = polys1.size(0)
+    m = polys2.size(0)
+    xmin = torch.cat([polys1.unsqueeze(1).repeat(1, m, 1, 1)[..., 0], polys2.unsqueeze(0).repeat(n, 1, 1, 1)[..., 0]], dim=-1).min(-1)[0]
+    xmax = torch.cat([polys1.unsqueeze(1).repeat(1, m, 1, 1)[..., 0], polys2.unsqueeze(0).repeat(n, 1, 1, 1)[..., 0]], dim=-1).max(-1)[0]
+    ymin = torch.cat([polys1.unsqueeze(1).repeat(1, m, 1, 1)[..., 1], polys2.unsqueeze(0).repeat(n, 1, 1, 1)[..., 1]], dim=-1).min(-1)[0]
+    ymax = torch.cat([polys1.unsqueeze(1).repeat(1, m, 1, 1)[..., 1], polys2.unsqueeze(0).repeat(n, 1, 1, 1)[..., 1]], dim=-1).max(-1)[0]
     areac = (xmax - xmin) * (ymax - ymin)
-    inter_area = torch.stack([area1, area2, inter_area]).min(0)[0]
-    union = area1 + area2 - inter_area
+    inter_area = torch.stack([area1.unsqueeze(1).repeat(1, m), area2.unsqueeze(0).repeat(n, 1), inter_area]).min(0)[0]
+    union = area1.unsqueeze(1).repeat(1, m) + area2.unsqueeze(0).repeat(n, 1) - inter_area
     iou = inter_area / (union + 1e-2)
     if iou_only:
         return iou
