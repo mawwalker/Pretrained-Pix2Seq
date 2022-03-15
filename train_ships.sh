@@ -10,4 +10,4 @@ python -m torch.distributed.launch --nproc_per_node=$GPUS --use_env main.py \
     --batch_size 4 \
     --coco_path ./HRSC \
     --num_classes 32 \
-    --output_dir ./output/HRSC_v6
+    --output_dir ./output/HRSC_v7

@@ -5,6 +5,7 @@ Pix2Seq model and criterion classes.
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torchmetrics import IoU
 
 from util.misc import (NestedTensor, nested_tensor_from_tensor_list,
                        accuracy, get_world_size, interpolate,
@@ -134,21 +135,38 @@ class Pix2Seq(nn.Module):
 
 
 class IoULoss(nn.Module):
-    def __init__(self, postprocessors, weight=None, size_average=True):
+    def __init__(self, postprocessors, reduction='mean', weight=None, size_average=True):
         super(IoULoss, self).__init__()
         self.postprocessors = postprocessors
+        self.reduction = reduction
 
-    def forward(self, outputs, targets):        
-        det_boxes = [output['boxes'] for output in self.postprocessors['bbox'](outputs, targets)]
+    def forward(self, outputs, targets):
         gt_boxes = [target['boxes'] * torch.stack([target["size"][1], target["size"][0], 
                                                    target["size"][1], target["size"][0], 
                                                    target["size"][1], target["size"][0], 
                                                    target["size"][1], target["size"][0]], dim=0)
                     for target in targets]
-        IoUs = [torch.mean(box_iou_rotated_poly(det_boxes[bs][:gt_boxes[bs].shape[0], :].reshape(-1, 4, 2),
-                                                gt_boxes[bs].reshape(-1, 4, 2))[2])
-                for bs in range(len(gt_boxes))]
-        # IoU_loss = torch.sum((torch.stack(IoUs)))
+        det_boxes = [output['boxes'] for output in self.postprocessors['bbox'](outputs, targets)]
+        bs = len(gt_boxes)
+        IoUs = []
+        for i in range(bs):
+            gt_box = gt_boxes[i]
+            gt_box = gt_box.reshape(gt_box.shape[0], 4, 2)
+            det_box = det_boxes[i][:gt_box.shape[0]]
+            det_box = det_box.reshape(det_box.shape[0], 4, 2)
+            iou_gt = []
+            for j in range(len(gt_box)):
+                iou_gtj = []
+                for k in range(len(det_box)):
+                    # box_iou_rotated_poly return : iou, iou loss, giou loss
+                    iou_gtj.append(box_iou_rotated_poly(det_box[k, ...].reshape(1, 4, 2), gt_box[j, ...].reshape(1, 4, 2))[2])
+                iou_gtj = torch.cat(iou_gtj, dim=-1).min(-1)[0]
+                iou_gt.append(iou_gtj)
+            if self.reduction == 'mean':
+                iou_gt = torch.mean(torch.stack(iou_gt))
+            elif self.reduction == 'sum':
+                iou_gt = torch.sum(torch.stack(iou_gt))
+            IoUs.append(iou_gt)
         return torch.mean((torch.stack(IoUs)))
 
 
@@ -234,11 +252,11 @@ class SetCriterion(nn.Module):
 
         loss_seq = F.cross_entropy(pred_seq_logits, target_seq, weight=self.empty_weight, reduction='sum') / num_pos
 
-        iou_loss = self.iou_loss_M(outputs, targets)
+        # iou_loss = self.iou_loss_M(outputs, targets)
         # Compute all the requested losses
         losses = dict()
         losses["loss_seq"] = loss_seq
-        losses['iou_loss'] = iou_loss
+        # losses['iou_loss'] = iou_loss
         return losses
 
 
@@ -332,8 +350,8 @@ def build(args):
         input_size=args.input_size)
 
     # weight_dict = {'loss_seq': 1, 'mse': 1, 'iou_loss': 1}
-    weight_dict = {'loss_seq': 1, 'iou_loss': 1}
-    # weight_dict = {'loss_seq': 1}
+    # weight_dict = {'loss_seq': 1, 'iou_loss': 2}
+    weight_dict = {'loss_seq': 1}
     criterion = SetCriterion(
         num_classes,
         weight_dict,
