@@ -134,6 +134,93 @@ class Pix2Seq(nn.Module):
         return torch.stack(input_seq_list, dim=0)
 
 
+class SoftArgmax1D(torch.nn.Module):
+    """
+    Implementation of a 1d soft arg-max function as an nn.Module, so that we can differentiate through arg-max operations.
+    """
+    def __init__(self, base_index=0, step_size=1):
+        """
+        The "arguments" are base_index, base_index+step_size, base_index+2*step_size, ... and so on for
+        arguments at indices 0, 1, 2, ....
+        Assumes that the input to this layer will be a batch of 1D tensors (so a 2D tensor).
+        :param base_index: Remember a base index for 'indices' for the input
+        :param step_size: Step size for 'indices' from the input
+        """
+        super(SoftArgmax1D, self).__init__()
+        self.base_index = base_index
+        self.step_size = step_size
+        self.softmax = torch.nn.Softmax(dim=-1)
+
+
+    def forward(self, x):
+        """
+        Compute the forward pass of the 1D soft arg-max function as defined below:
+        SoftArgMax(x) = \sum_i (i * softmax(x)_i)
+        :param x: The input to the soft arg-max layer
+        :return: Output of the soft arg-max layer
+        """
+        smax = self.softmax(x)
+        end_index = self.base_index + x.size()[-1] * self.step_size
+        indices = torch.arange(start=self.base_index, end=end_index, step=self.step_size).float().to(x.device)
+        return torch.matmul(smax, indices)
+
+
+class PostProcess_Train(nn.Module):
+    """ This module converts the model's output into the format expected by the coco api"""
+    def __init__(self, num_bins, num_classes, input_size=1333):
+        super().__init__()
+        self.num_bins = num_bins
+        self.num_classes = num_classes
+        self.input_size = input_size
+
+    def forward(self, outputs, targets):
+        """ Perform the computation
+        Parameters:
+            outputs: raw outputs of the model
+            targets:
+            # target_sizes: tensor of dimension [batch_size x 2] containing the size of each images of the batch
+            #               For evaluation, this must be the original image size (before any data augmentation)
+            #               For visualization, this should be the image size after data augment, but before padding
+        """
+        origin_img_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)
+        input_img_sizes = torch.stack([t["size"] for t in targets], dim=0)
+        out_seq_logits = outputs['pred_seq_logits']
+
+        assert len(out_seq_logits) == len(origin_img_sizes)
+
+        # and from relative [0, 1] to absolute [0, height] coordinates
+        ori_img_h, ori_img_w = origin_img_sizes.unbind(1)
+        inp_img_h, inp_img_w = input_img_sizes.unbind(1)
+        scale_fct = torch.stack(
+            [ori_img_w / inp_img_w, ori_img_h / inp_img_h,
+             ori_img_w / inp_img_w, ori_img_h / inp_img_h,
+             ori_img_w / inp_img_w, ori_img_h / inp_img_h,
+             ori_img_w / inp_img_w, ori_img_h / inp_img_h], dim=1).unsqueeze(1)
+
+        results = []
+        for b_i, pred_seq_logits in enumerate(out_seq_logits):
+            seq_len = pred_seq_logits.shape[0]
+            if seq_len < 9:
+                results.append(dict())
+                continue
+            pred_seq_logits = pred_seq_logits.softmax(dim=-1)
+            num_objects = seq_len // 9
+            pred_seq_logits = pred_seq_logits[:int(num_objects * 9)].reshape(num_objects, 9, -1)
+            pred_boxes_logits = pred_seq_logits[:, :8, :self.num_bins + 1]
+            pred_class_logits = pred_seq_logits[:, 8, self.num_bins + 1: self.num_bins + 1 + self.num_classes]
+            scores_per_image, labels_per_image = torch.max(pred_class_logits, dim=1)
+            # boxes_per_image = pred_boxes_logits.argmax(dim=2) * self.input_size / self.num_bins
+            boxes_per_image = SoftArgmax1D()(pred_boxes_logits)
+            boxes_per_image = boxes_per_image * scale_fct[b_i]
+            result = dict()
+            result['scores'] = scores_per_image
+            result['labels'] = labels_per_image
+            result['boxes'] = boxes_per_image
+            results.append(result)
+
+        return results
+
+
 class IoULoss(nn.Module):
     def __init__(self, postprocessors, reduction='mean', weight=None, size_average=True):
         super(IoULoss, self).__init__()
@@ -180,7 +267,7 @@ class SetCriterion(nn.Module):
         self.register_buffer('empty_weight', empty_weight)
         self.weight_dict = weight_dict
         self.input_size = input_size
-        self.postprocessors = {'bbox': PostProcess(num_bins, num_classes, input_size)}
+        self.postprocessors = {'bbox': PostProcess_Train(num_bins, num_classes, input_size)}
         self.iou_loss_M = IoULoss(self.postprocessors)
 
     def build_target_seq(self, targets, max_objects=100):
