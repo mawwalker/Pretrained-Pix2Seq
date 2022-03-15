@@ -1,8 +1,15 @@
 import torch
+import argparse
 
-pretrained_weights = torch.load('./output/coco_v5/checkpoint.pth')
+parser = argparse.ArgumentParser('Resize vocal', add_help=False)
+parser.add_argument('--num', default=90, type=int, help="class num")
+parser.add_argument('--weight', type=str, default="./coco_ap370.pth",
+                    help="source weight path")
+args = parser.parse_args()
 
-num_classes = 16 + 1
+pretrained_weights = torch.load(args.weight)
+
+num_classes = args.num + 1
 num_bins = 2000
 num_vocal = num_bins + 1 + num_classes + 2
 '''
