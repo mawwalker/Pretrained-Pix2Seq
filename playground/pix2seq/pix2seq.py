@@ -235,15 +235,15 @@ class IoULoss(nn.Module):
                     for target in targets]
         det_boxes = [output['boxes'] for output in self.postprocessors['bbox'](outputs, targets)]
         bs = len(gt_boxes)
-        IoUs = []
+        losses_IoU = []
         for i in range(bs):
             gt_box = gt_boxes[i]
             gt_box = gt_box.reshape(gt_box.shape[0], 4, 2)
             det_box = det_boxes[i]
             det_box = det_box.reshape(det_box.shape[0], 4, 2)
-            iou_gt = box_iou_rotated_poly(gt_box, det_box)[2].min(-1)[0].mean()
-            IoUs.append(iou_gt)
-        return torch.mean((torch.stack(IoUs)))
+            loss_giou =  (1 - torch.diag(box_iou_rotated_poly(gt_box, det_box)[2])).sum() / gt_box.shape[0]
+            losses_IoU.append(loss_giou)
+        return torch.mean((torch.stack(losses_IoU)))
 
 
 class SetCriterion(nn.Module):

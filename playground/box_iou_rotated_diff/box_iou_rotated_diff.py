@@ -97,5 +97,5 @@ def box_iou_rotated_poly(polys1: torch.Tensor, polys2: torch.Tensor, iou_only: b
     if iou_only:
         return iou
     else:
-        # iou, iou_loss, giou_loss
-        return iou, 1 - iou, 1. - iou + torch.abs((areac - union) / (areac + 1e-2))
+        # iou, iou_loss, giou, giou_loss
+        return iou, 1 - iou, iou - torch.abs((areac - union) / (areac + 1e-2)), 1. - iou + torch.abs((areac - union) / (areac + 1e-2))
