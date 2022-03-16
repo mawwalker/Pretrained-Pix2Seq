@@ -35,7 +35,7 @@ def get_args_parser():
     parser.add_argument('--pred_eos', action='store_true', help='use eos token instead of predicting 100 objects')
 
     # * Backbone
-    parser.add_argument('--backbone', default='swin', type=str,
+    parser.add_argument('--backbone', default='swin_L', type=str,
                         help="Name of the convolutional backbone to use")
     parser.add_argument('--dilation', action='store_true',
                         help="If true, we replace stride with dilation in the last convolutional block (DC5)")
@@ -69,10 +69,10 @@ def get_args_parser():
 
     parser.add_argument('--output_dir', default='',
                         help='path where to save, empty for no saving')
-    parser.add_argument('--device', default='cuda',
+    parser.add_argument('--device', default='cpu',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='output/ships_v2/checkpoint_best.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='output/HRSC_4cls_v5/checkpoint_best.pth', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--eval', action='store_true')
@@ -83,9 +83,9 @@ def get_args_parser():
                         help='number of distributed processes')
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
     
-    parser.add_argument('--num_classes', default=12, type=int, help='max ID of the datasets')
+    parser.add_argument('--num_classes', default=4, type=int, help='max ID of the datasets')
     
-    parser.add_argument('--img_path', default='/home/dsm/Datasets/ships/val2017/100001000.jpg', type=str, help='the path to predict')
+    parser.add_argument('--img_path', default='./HRSC/Test/AllImages/100000890.jpg', type=str, help='the path to predict')
     parser.add_argument('--swin_path', default='', help='resume from swin transformer')
     parser.add_argument('--activation', default='relu', help='transformer activation function')
     parser.add_argument('--input_size', default=1333, type=int, help='max ID of the datasets')
@@ -120,12 +120,28 @@ def plot_one_box(x, im, color=(128, 128, 128), label=None, line_thickness=3):
         c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
         cv2.rectangle(im, c1, c2, color, -1, cv2.LINE_AA)  # filled
         cv2.putText(im, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
+        
+def plot_one_box_polyl(x, im, color=(128, 128, 128), label=None, line_thickness=3):
+    # Plots one bounding box on image 'im' using OpenCV
+    assert im.data.contiguous, 'Image not contiguous. Apply np.ascontiguousarray(im) to plot_on_box() input image.'
+    tl = line_thickness or round(0.002 * (im.shape[0] + im.shape[1]) / 2) + 1  # line/font thickness
+    points = np.array(x).reshape(4, 2).reshape(4, 1, 2).astype(int)
+    # c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
+    # cv2.rectangle(im, c1, c2, color, thickness=tl, lineType=cv2.LINE_AA)
+    cv2.polylines(im, [points], True, color, line_thickness)
+    if label:
+        tf = max(tl - 1, 1)  # font thickness
+        t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
+        # c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
+        # cv2.rectangle(im, c1, c2, color, -1, cv2.LINE_AA)  # filled
+        cv2.putText(im, label, (int(x[0]), int(x[1]) - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
 
 def main(args):
     utils.init_distributed_mode(args)
     print("git:\n  {}\n".format(utils.get_sha()))
 
     names = ['QHJ', 'XYJ', 'DLJ', 'YSJ', 'LGJ', 'HKMJ', 'ZHJ', 'QT', 'HC', 'KC', 'BZJ', 'YLC', 'ship']
+    names = ['ship', 'aircraft carrier', 'warcraft', 'merchant ship']
     
     device = torch.device(args.device)
 
@@ -151,6 +167,7 @@ def main(args):
     image = image.convert('RGB')
     
     w_ori, h_ori = image.size
+    print(image.size)
     # image = np.array(image).astype(np.uint8)
     
     #transform
@@ -160,7 +177,7 @@ def main(args):
     ])
 
     transform = T.Compose([
-        T.RandomResize([800], max_size=512),
+        # T.RandomResize([800], max_size=1333),
         normalize,
     ])
 
@@ -188,20 +205,22 @@ def main(args):
     num_classes = args.num_classes
     scale_fct = torch.stack(
             [ori_img_w / inp_img_w, ori_img_h / inp_img_h,
+             ori_img_w / inp_img_w, ori_img_h / inp_img_h,
+             ori_img_w / inp_img_w, ori_img_h / inp_img_h,
              ori_img_w / inp_img_w, ori_img_h / inp_img_h], dim=1).unsqueeze(1).to(device)
     results = []
     image = cv2.imread(args.img_path)
     for b_i, pred_seq_logits in enumerate(out_seq_logits):
         # print('pred_seq_logits'.format(pred_seq_logits))
         seq_len = pred_seq_logits.shape[0]
-        if seq_len < 5:
+        if seq_len < 9:
             results.append(dict())
             continue
         pred_seq_logits = pred_seq_logits.softmax(dim=-1)
-        num_objects = seq_len // 5
-        pred_seq_logits = pred_seq_logits[:int(num_objects * 5)].reshape(num_objects, 5, -1)
-        pred_boxes_logits = pred_seq_logits[:, :4, :num_bins + 1]
-        pred_class_logits = pred_seq_logits[:, 4, num_bins + 1: num_bins + 1 + num_classes]
+        num_objects = seq_len // 9
+        pred_seq_logits = pred_seq_logits[:int(num_objects * 9)].reshape(num_objects, 9, -1)
+        pred_boxes_logits = pred_seq_logits[:, :8, :num_bins + 1]
+        pred_class_logits = pred_seq_logits[:, 8, num_bins + 1: num_bins + 1 + num_classes]
         # print(pred_class_logits)
         scores_per_image, labels_per_image = torch.max(pred_class_logits, dim=1)
         boxes_per_image = pred_boxes_logits.argmax(dim=2) * 1333 / num_bins
@@ -214,14 +233,14 @@ def main(args):
                                          labels_per_image.detach().cpu().numpy(),
                                          boxes_per_image.detach().cpu().numpy()):
             box = box.tolist()
-            if score > 0.25:
+            if score > 0.75:
                 result['scores'].append(score)
                 result['labels'].append(cls)
                 result['boxes'].append(box)
                 # print('box: ', box)
                 colors = Colors()
-                c = int(cls)
-                plot_one_box(box, image, label=names[c], color=colors(c, True), line_thickness=3)
+                c = int(cls - 1)
+                plot_one_box_polyl(box, image, label=names[c], color=colors(c, True), line_thickness=3)
             else:
                 break
         cv2.imwrite('./result.jpg', image)
