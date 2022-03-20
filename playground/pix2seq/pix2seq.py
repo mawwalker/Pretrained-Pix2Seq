@@ -210,7 +210,7 @@ class PostProcess_Train(nn.Module):
             pred_class_logits = pred_seq_logits[:, 8, self.num_bins + 1: self.num_bins + 1 + self.num_classes]
             scores_per_image, labels_per_image = torch.max(pred_class_logits, dim=1)
             # boxes_per_image = pred_boxes_logits.argmax(dim=2) * self.input_size / self.num_bins
-            boxes_per_image = SoftArgmax1D()(pred_boxes_logits)
+            boxes_per_image = SoftArgmax1D()(pred_boxes_logits) * self.input_size / self.num_bins
             boxes_per_image = boxes_per_image * scale_fct[b_i]
             result = dict()
             result['scores'] = scores_per_image
