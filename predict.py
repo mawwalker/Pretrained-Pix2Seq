@@ -1,11 +1,8 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 import argparse
-import random
-import time
 
 import numpy as np
 import torch
-import util.misc as utils
 from playground import build_all_model
 import datasets.transforms as T
 from PIL import Image
@@ -14,16 +11,12 @@ import cv2
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
-    parser.add_argument('--lr', default=1e-3, type=float)
     parser.add_argument('--lr_backbone', default=1e-4, type=float)
     parser.add_argument('--weight_decay', default=0.05, type=float)
     parser.add_argument('--batch_size', default=2, type=int)
-    parser.add_argument('--epochs', default=300, type=int)
     parser.add_argument('--lr_drop', default=200, type=int)
     parser.add_argument('--clip_max_norm', default=0.1, type=float,
                         help='gradient clipping max norm')
-    parser.add_argument('--amp_train', action='store_true', help='amp fp16 training or not')
-    parser.add_argument('--eval_epoch', default=5, type=int)
 
     # Pix2Seq
     parser.add_argument('--model', type=str, default="pix2seq",
@@ -63,25 +56,11 @@ def get_args_parser():
 
     # dataset parameters
     parser.add_argument('--dataset_file', default='coco')
-    parser.add_argument('--coco_path', default='./coco', type=str)
     parser.add_argument('--coco_panoptic_path', type=str)
-    parser.add_argument('--remove_difficult', action='store_true')
-
-    parser.add_argument('--output_dir', default='',
-                        help='path where to save, empty for no saving')
     parser.add_argument('--device', default='cpu',
                         help='device to use for training / testing')
-    parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--resume', default='output/HRSC_4cls_v5/checkpoint_best.pth', help='resume from checkpoint')
-    parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
-                        help='start epoch')
-    parser.add_argument('--eval', action='store_true')
     parser.add_argument('--num_workers', default=2, type=int)
-
-    # distributed training parameters
-    parser.add_argument('--world_size', default=1, type=int,
-                        help='number of distributed processes')
-    parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
     
     parser.add_argument('--num_classes', default=4, type=int, help='max ID of the datasets')
     
@@ -136,63 +115,7 @@ def plot_one_box_polyl(x, im, color=(128, 128, 128), label=None, line_thickness=
         # cv2.rectangle(im, c1, c2, color, -1, cv2.LINE_AA)  # filled
         cv2.putText(im, label, (int(x[0]), int(x[1]) - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
 
-def main(args):
-    utils.init_distributed_mode(args)
-    print("git:\n  {}\n".format(utils.get_sha()))
-
-    names = ['QHJ', 'XYJ', 'DLJ', 'YSJ', 'LGJ', 'HKMJ', 'ZHJ', 'QT', 'HC', 'KC', 'BZJ', 'YLC', 'ship']
-    names = ['ship', 'aircraft carrier', 'warcraft', 'merchant ship']
-    
-    device = torch.device(args.device)
-
-    # fix the seed for reproducibility
-    seed = args.seed + utils.get_rank()
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-
-    model, criterion, postprocessors = build_all_model[args.model](args)
-    
-    if args.resume:
-        if args.resume.startswith('https'):
-            checkpoint = torch.hub.load_state_dict_from_url(
-                args.resume, map_location='cpu', check_hash=True)
-        else:
-            checkpoint = torch.load(args.resume, map_location='cpu')
-        model.load_state_dict(checkpoint['model'], strict=False)
-
-    model.to(device)
-    #read image
-    image = Image.open(args.img_path)
-    image = image.convert('RGB')
-    
-    w_ori, h_ori = image.size
-    print(image.size)
-    # image = np.array(image).astype(np.uint8)
-    
-    #transform
-    normalize = T.Compose([
-        T.ToTensor(),
-        T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    ])
-
-    transform = T.Compose([
-        # T.RandomResize([800], max_size=1333),
-        normalize,
-    ])
-
-    image_new = transform(image, None)
-
-    c,h,w = image_new[0].shape
-    print(c, h, w)
-    image_new = image_new[0].view(1, c, h, w).to(device)
-    seq = torch.ones(1, 1).to(device,dtype=torch.long) * 2001
-    model.eval()
-
-    # get predictions
-    # print('input_seq: {}'.format(seq.shape))
-    output = model([image_new,seq])
-    # print('output: {}'.format(output))
+def PostProcess(args, output, names, h_ori, w_ori, h, w):
     out_seq_logits = output['pred_seq_logits']
     
     orig_size = torch.as_tensor([int(h_ori), int(w_ori)])
@@ -207,7 +130,7 @@ def main(args):
             [ori_img_w / inp_img_w, ori_img_h / inp_img_h,
              ori_img_w / inp_img_w, ori_img_h / inp_img_h,
              ori_img_w / inp_img_w, ori_img_h / inp_img_h,
-             ori_img_w / inp_img_w, ori_img_h / inp_img_h], dim=1).unsqueeze(1).to(device)
+             ori_img_w / inp_img_w, ori_img_h / inp_img_h], dim=1).unsqueeze(1).to(args.device)
     results = []
     image = cv2.imread(args.img_path)
     for b_i, pred_seq_logits in enumerate(out_seq_logits):
@@ -246,6 +169,52 @@ def main(args):
         cv2.imwrite('./result.jpg', image)
         results.append(result)
     print(results)
+    return results
+
+def main(args):
+    names = ['QHJ', 'XYJ', 'DLJ', 'YSJ', 'LGJ', 'HKMJ', 'ZHJ', 'QT', 'HC', 'KC', 'BZJ', 'YLC', 'ship']
+    names = ['ship', 'aircraft carrier', 'warcraft', 'merchant ship']
+    
+    device = torch.device(args.device)
+
+    model, _, _ = build_all_model[args.model](args)
+    
+    checkpoint = torch.load(args.resume, map_location='cpu')
+    model.load_state_dict(checkpoint['model'], strict=False)
+
+    model.to(device)
+    #read image
+    image = Image.open(args.img_path)
+    image = image.convert('RGB')
+    
+    w_ori, h_ori = image.size
+    print(image.size)
+    # image = np.array(image).astype(np.uint8)
+    
+    #transform
+    normalize = T.Compose([
+        T.ToTensor(),
+        T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+
+    transform = T.Compose([
+        # T.RandomResize([800], max_size=1333),
+        normalize,
+    ])
+
+    image_new = transform(image, None)
+
+    c,h,w = image_new[0].shape
+    print(c, h, w)
+    image_new = image_new[0].view(1, c, h, w).to(device)
+    seq = torch.ones(1, 1).to(device,dtype=torch.long) * 2001
+    model.eval()
+
+    # get predictions
+    # print('input_seq: {}'.format(seq.shape))
+    output = model([image_new,seq])
+    # print('output: {}'.format(output))
+    results = PostProcess(args, output, names, h_ori, w_ori, h, w)
 
 
 if __name__ == '__main__':
