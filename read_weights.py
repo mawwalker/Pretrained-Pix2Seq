@@ -24,6 +24,7 @@ transformer.vocal_embed.weight: torch.Size([2092, 256])
 '''
 # for x in pretrained['model']:
     # print(x)
+print('before resize: ')
 model = pretrained_weights['model']
 for x in model:
     if isinstance(model[x], torch.Tensor):
@@ -35,6 +36,7 @@ pretrained_weights['model']['transformer.vocal_classifier.weight'].resize_(num_v
 pretrained_weights['model']['transformer.vocal_classifier.bias'].resize_(num_vocal)
 pretrained_weights['model']['transformer.vocal_embed.weight'].resize_(num_bins + num_classes + 1, 256)
 
+print('after resize: ')
 for x in pretrained_weights['model']:
     if isinstance(model[x], torch.Tensor):
         print('{}: {}'.format(x, model[x].shape))
