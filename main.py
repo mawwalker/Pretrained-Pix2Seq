@@ -96,6 +96,8 @@ def get_args_parser():
     parser.add_argument('--transfer', default=False, action='store_true', help='transfer learning from swin & COCO-pretrained-pix2seq')
     parser.add_argument('--activation', default='relu', help='transformer activation function')
     parser.add_argument('--input_size', default=1333, type=int, help='input size of the pix2seq model')
+    parser.add_argument('--need_attn', default=False, action='store_true',
+                        help='if return the deformable attention weights, for visualization only')
     return parser
 
 

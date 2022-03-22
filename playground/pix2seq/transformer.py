@@ -24,7 +24,7 @@ class Transformer(nn.Module):
     def __init__(self, d_model=512, nhead=8, num_encoder_layers=6,
                  num_decoder_layers=6, dim_feedforward=1024, dropout=0.1,
                  activation="relu", normalize_before=False, num_vocal=2094,
-                 pred_eos=False, scales=1, k=4, last_height=16, last_width=16):
+                 pred_eos=False, scales=1, k=4, last_height=16, last_width=16, need_attn=False):
         super().__init__()
         rpe_config = irpe.get_rpe_config(
                         ratio=1.9,
@@ -40,7 +40,8 @@ class Transformer(nn.Module):
             last_feat_width=last_width, 
             dim_feedforward=dim_feedforward, dropout=dropout,
             activation=activation, normalize_before=normalize_before,
-            rpe_config=rpe_config
+            rpe_config=rpe_config,
+            need_attn=need_attn
             )
         encoder_norm = nn.LayerNorm(d_model) if normalize_before else None
         self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
@@ -48,7 +49,8 @@ class Transformer(nn.Module):
         decoder_layer = TransformerDecoderLayer(
             d_model, nhead,
             dim_feedforward=dim_feedforward, dropout=dropout,
-            activation=activation, normalize_before=normalize_before)
+            activation=activation, normalize_before=normalize_before,
+            need_attn=need_attn)
         decoder_norm = nn.LayerNorm(d_model)
         self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm)
         self._reset_parameters()
@@ -475,6 +477,7 @@ def build_transformer(args, num_vocal):
         normalize_before=args.pre_norm,
         num_vocal=num_vocal,
         pred_eos=args.pred_eos,
+        need_attn=args.need_attn
     )
 
 
