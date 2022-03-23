@@ -7,13 +7,15 @@ from playground import build_all_model
 import datasets.transforms as T
 from PIL import Image
 import cv2
+import os
+torch.set_grad_enabled(False);
 
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
     parser.add_argument('--lr_backbone', default=1e-4, type=float)
     parser.add_argument('--weight_decay', default=0.05, type=float)
-    parser.add_argument('--batch_size', default=2, type=int)
+    parser.add_argument('--batch_size', default=1, type=int)
     parser.add_argument('--lr_drop', default=200, type=int)
     parser.add_argument('--clip_max_norm', default=0.1, type=float,
                         help='gradient clipping max norm')
@@ -59,15 +61,17 @@ def get_args_parser():
     parser.add_argument('--coco_panoptic_path', type=str)
     parser.add_argument('--device', default='cpu',
                         help='device to use for training / testing')
-    parser.add_argument('--resume', default='output/HRSC_4cls_v5/checkpoint_best.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='output/dota_v6_2/checkpoint_best.pth', help='resume from checkpoint')
     parser.add_argument('--num_workers', default=2, type=int)
     
-    parser.add_argument('--num_classes', default=4, type=int, help='max ID of the datasets')
+    parser.add_argument('--num_classes', default=2, type=int, help='max ID of the datasets')
     
-    parser.add_argument('--img_path', default='./HRSC/Test/AllImages/100000890.jpg', type=str, help='the path to predict')
-    parser.add_argument('--swin_path', default='', help='resume from swin transformer')
+    parser.add_argument('--img_path', default='./DOTA/train2017/P0023__1.0__1000___3918.png', type=str, help='the path to predict')
+    parser.add_argument('--swin_path', default='./weights/swin_large_patch4_window7_224_22k.pth', help='resume from swin transformer')
     parser.add_argument('--activation', default='relu', help='transformer activation function')
     parser.add_argument('--input_size', default=1333, type=int, help='max ID of the datasets')
+    parser.add_argument('--need_attn', default=False, action='store_true',
+                        help='if return the deformable attention weights, for visualization only')
     return parser
 
 class Colors:
@@ -115,7 +119,17 @@ def plot_one_box_polyl(x, im, color=(128, 128, 128), label=None, line_thickness=
         # cv2.rectangle(im, c1, c2, color, -1, cv2.LINE_AA)  # filled
         cv2.putText(im, label, (int(x[0]), int(x[1]) - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
 
-def PostProcess(args, output, names, h_ori, w_ori, h, w):
+def isfakebox(box):
+    border_flag = 0
+    for p in box:
+        if abs(int(p) - 1333) < 20 or int(p) < 20:
+            border_flag += 1
+    if border_flag == 8:
+        return True
+    else:
+        return False
+
+def PostProcess(args, origin_path, output, names, h_ori, w_ori, h, w):
     out_seq_logits = output['pred_seq_logits']
     
     orig_size = torch.as_tensor([int(h_ori), int(w_ori)])
@@ -132,7 +146,7 @@ def PostProcess(args, output, names, h_ori, w_ori, h, w):
              ori_img_w / inp_img_w, ori_img_h / inp_img_h,
              ori_img_w / inp_img_w, ori_img_h / inp_img_h], dim=1).unsqueeze(1).to(args.device)
     results = []
-    image = cv2.imread(args.img_path)
+    image = cv2.imread(origin_path)
     for b_i, pred_seq_logits in enumerate(out_seq_logits):
         # print('pred_seq_logits'.format(pred_seq_logits))
         seq_len = pred_seq_logits.shape[0]
@@ -156,7 +170,7 @@ def PostProcess(args, output, names, h_ori, w_ori, h, w):
                                          labels_per_image.detach().cpu().numpy(),
                                          boxes_per_image.detach().cpu().numpy()):
             box = box.tolist()
-            if score > 0.75:
+            if score > 0.25 and not isfakebox(box):
                 result['scores'].append(score)
                 result['labels'].append(cls)
                 result['boxes'].append(box)
@@ -166,7 +180,8 @@ def PostProcess(args, output, names, h_ori, w_ori, h, w):
                 plot_one_box_polyl(box, image, label=names[c], color=colors(c, True), line_thickness=3)
             else:
                 break
-        cv2.imwrite('./result.jpg', image)
+        if len(result['boxes']) > 0:
+            cv2.imwrite('./predict_results/' + os.path.basename(origin_path), image)
         results.append(result)
     print(results)
     return results
@@ -174,6 +189,7 @@ def PostProcess(args, output, names, h_ori, w_ori, h, w):
 def main(args):
     names = ['QHJ', 'XYJ', 'DLJ', 'YSJ', 'LGJ', 'HKMJ', 'ZHJ', 'QT', 'HC', 'KC', 'BZJ', 'YLC', 'ship']
     names = ['ship', 'aircraft carrier', 'warcraft', 'merchant ship']
+    names = ['plane']
     
     device = torch.device(args.device)
 
@@ -183,38 +199,41 @@ def main(args):
     model.load_state_dict(checkpoint['model'], strict=False)
 
     model.to(device)
-    #read image
-    image = Image.open(args.img_path)
-    image = image.convert('RGB')
-    
-    w_ori, h_ori = image.size
-    print(image.size)
-    # image = np.array(image).astype(np.uint8)
-    
-    #transform
-    normalize = T.Compose([
-        T.ToTensor(),
-        T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    ])
-
-    transform = T.Compose([
-        # T.RandomResize([800], max_size=1333),
-        normalize,
-    ])
-
-    image_new = transform(image, None)
-
-    c,h,w = image_new[0].shape
-    print(c, h, w)
-    image_new = image_new[0].view(1, c, h, w).to(device)
-    seq = torch.ones(1, 1).to(device,dtype=torch.long) * 2001
     model.eval()
+    predict_dir = './DOTA/train2017/'
+    for file in os.listdir(path=predict_dir):
+        file_path = os.path.join(predict_dir, file)
+        #read image
+        image = Image.open(file_path)
+        image = image.convert('RGB')
+        
+        w_ori, h_ori = image.size
+        print(image.size)
+        # image = np.array(image).astype(np.uint8)
+        
+        #transform
+        normalize = T.Compose([
+            T.ToTensor(),
+            T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
 
-    # get predictions
-    # print('input_seq: {}'.format(seq.shape))
-    output = model([image_new,seq])
-    # print('output: {}'.format(output))
-    results = PostProcess(args, output, names, h_ori, w_ori, h, w)
+        transform = T.Compose([
+            # T.RandomResize([800], max_size=1333),
+            normalize,
+        ])
+
+        image_new = transform(image, None)
+
+        c,h,w = image_new[0].shape
+        print(c, h, w)
+        image_new = image_new[0].view(1, c, h, w).to(device)
+        seq = torch.ones(1, 1).to(device,dtype=torch.long) * 2001
+
+        # get predictions
+        # print('input_seq: {}'.format(seq.shape))
+        output = model([image_new, seq])
+        # print('output: {}'.format(output))
+        results = PostProcess(args, file_path, output, names, h_ori, w_ori, h, w)
 
 
 if __name__ == '__main__':

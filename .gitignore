@@ -30,3 +30,5 @@ tags
 screenlog.*
 result.jpg
 *.jpg
+visualize/
+predict_results/
