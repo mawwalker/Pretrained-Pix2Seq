@@ -59,12 +59,12 @@ def get_args_parser():
     # dataset parameters
     parser.add_argument('--dataset_file', default='coco')
     parser.add_argument('--coco_panoptic_path', type=str)
-    parser.add_argument('--device', default='cpu',
+    parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
-    parser.add_argument('--resume', default='output/dota_v6_2/checkpoint_best.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='output/HRSC_4cls_v5/checkpoint_best.pth', help='resume from checkpoint')
     parser.add_argument('--num_workers', default=2, type=int)
     
-    parser.add_argument('--num_classes', default=2, type=int, help='max ID of the datasets')
+    parser.add_argument('--num_classes', default=4, type=int, help='max ID of the datasets')
     
     parser.add_argument('--img_path', default='./DOTA/train2017/P0023__1.0__1000___3918.png', type=str, help='the path to predict')
     parser.add_argument('--swin_path', default='./weights/swin_large_patch4_window7_224_22k.pth', help='resume from swin transformer')
@@ -171,6 +171,7 @@ def PostProcess(args, origin_path, output, names, h_ori, w_ori, h, w):
                                          boxes_per_image.detach().cpu().numpy()):
             box = box.tolist()
             if score > 0.25 and not isfakebox(box):
+            # if True:
                 result['scores'].append(score)
                 result['labels'].append(cls)
                 result['boxes'].append(box)
@@ -181,7 +182,7 @@ def PostProcess(args, origin_path, output, names, h_ori, w_ori, h, w):
             else:
                 break
         if len(result['boxes']) > 0:
-            cv2.imwrite('./predict_results/' + os.path.basename(origin_path), image)
+            cv2.imwrite('./predict_results/ships/' + os.path.basename(origin_path), image)
         results.append(result)
     print(results)
     return results
@@ -189,7 +190,7 @@ def PostProcess(args, origin_path, output, names, h_ori, w_ori, h, w):
 def main(args):
     names = ['QHJ', 'XYJ', 'DLJ', 'YSJ', 'LGJ', 'HKMJ', 'ZHJ', 'QT', 'HC', 'KC', 'BZJ', 'YLC', 'ship']
     names = ['ship', 'aircraft carrier', 'warcraft', 'merchant ship']
-    names = ['plane']
+    # names = ['plane']
     
     device = torch.device(args.device)
 
@@ -200,7 +201,7 @@ def main(args):
 
     model.to(device)
     model.eval()
-    predict_dir = './DOTA/train2017/'
+    predict_dir = './HRSC/Train/AllImages/'
     for file in os.listdir(path=predict_dir):
         file_path = os.path.join(predict_dir, file)
         #read image
