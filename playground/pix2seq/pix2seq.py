@@ -335,6 +335,15 @@ class SetCriterion(nn.Module):
         losses['iou_loss'] = iou_loss
         return losses
 
+def isfakebox(box):
+    border_flag = 0
+    for p in box:
+        if abs(int(p) - 1333) < 20 or int(p) < 20:
+            border_flag += 1
+    if border_flag == 8:
+        return True
+    else:
+        return False
 
 class PostProcess(nn.Module):
     """ This module converts the model's output into the format expected by the coco api"""
@@ -384,11 +393,26 @@ class PostProcess(nn.Module):
             boxes_per_image = pred_boxes_logits.argmax(dim=2) * self.input_size / self.num_bins
             boxes_per_image = boxes_per_image * scale_fct[b_i]
             result = dict()
-            result['scores'] = scores_per_image
-            result['labels'] = labels_per_image
-            result['boxes'] = boxes_per_image
-            results.append(result)
-
+            # result['scores'] = scores_per_image
+            # result['labels'] = labels_per_image
+            # result['boxes'] = boxes_per_image
+            # results.append(result)
+            result['scores'] = []
+            result['labels'] = []
+            result['boxes'] = []
+            for score, cls, box in zip(scores_per_image.detach().cpu().numpy(),
+                                       labels_per_image.detach().cpu().numpy(),
+                                       boxes_per_image.detach().cpu().numpy()):
+                box = box.tolist()
+                if not isfakebox(box):
+                    result['scores'].append(score)
+                    result['labels'].append(cls)
+                    result['boxes'].append(box)
+                    # print('box: ', box)
+                else:
+                    break
+                results.append(result)
+            print("result: ", results)
         return results
 
 
