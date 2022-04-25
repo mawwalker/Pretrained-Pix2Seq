@@ -14,7 +14,8 @@ from util.misc import (NestedTensor, nested_tensor_from_tensor_list,
 from .backbone import build_backbone
 from .transformer import build_transformer
 from util.box_ops import box_cxcywh_to_xyxy, box_iou, get_wh
-from playground.box_iou_rotated_diff.box_iou_rotated_diff import box_iou_rotated_poly
+# from playground.box_iou_rotated_diff.box_iou_rotated_diff import box_iou_rotated_poly
+from playground.box_iou_rotated_nn.box_iou_rotated_diff import box_iou_rotated_poly
 
 
 class Pix2Seq(nn.Module):
@@ -239,8 +240,8 @@ class IoULoss(nn.Module):
         for i in range(bs):
             gt_box = gt_boxes[i]
             gt_box = gt_box.reshape(gt_box.shape[0], 4, 2)
-            det_box = det_boxes[i]
-            det_box = det_box.reshape(det_box.shape[0], 4, 2)
+            det_box = det_boxes[i][:gt_box.shape[0], ...]
+            det_box = det_box.reshape(gt_box.shape[0], 4, 2)
             loss_giou =  (1 - torch.diag(box_iou_rotated_poly(gt_box, det_box)[2])).sum() / gt_box.shape[0]
             losses_IoU.append(loss_giou)
         return torch.mean((torch.stack(losses_IoU)))
@@ -393,26 +394,26 @@ class PostProcess(nn.Module):
             boxes_per_image = pred_boxes_logits.argmax(dim=2) * self.input_size / self.num_bins
             boxes_per_image = boxes_per_image * scale_fct[b_i]
             result = dict()
-            # result['scores'] = scores_per_image
-            # result['labels'] = labels_per_image
-            # result['boxes'] = boxes_per_image
-            # results.append(result)
-            result['scores'] = []
-            result['labels'] = []
-            result['boxes'] = []
-            for score, cls, box in zip(scores_per_image.detach().cpu().numpy(),
-                                       labels_per_image.detach().cpu().numpy(),
-                                       boxes_per_image.detach().cpu().numpy()):
-                box = box.tolist()
-                if not isfakebox(box):
-                    result['scores'].append(score)
-                    result['labels'].append(cls)
-                    result['boxes'].append(box)
-                    # print('box: ', box)
-                else:
-                    break
-                results.append(result)
-            print("result: ", results)
+            result['scores'] = scores_per_image
+            result['labels'] = labels_per_image
+            result['boxes'] = boxes_per_image
+            results.append(result)
+            # result['scores'] = []
+            # result['labels'] = []
+            # result['boxes'] = []
+            # for score, cls, box in zip(scores_per_image.detach().cpu().numpy(),
+                                       # labels_per_image.detach().cpu().numpy(),
+                                       # boxes_per_image.detach().cpu().numpy()):
+                # box = box.tolist()
+                # if not isfakebox(box):
+                    # result['scores'].append(score)
+                    # result['labels'].append(cls)
+                    # result['boxes'].append(box)
+                    # # print('box: ', box)
+                # else:
+                    # break
+                # results.append(result)
+            # print("result: ", results)
         return results
 
 
