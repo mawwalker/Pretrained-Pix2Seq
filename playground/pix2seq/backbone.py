@@ -20,6 +20,7 @@ from util.misc import NestedTensor, is_main_process
 
 from .position_encoding import build_position_encoding
 from .swin_transformer import SwinPatch
+from .fpn_fusion import FPNFusionModule
 
 class FrozenBatchNorm2d(torch.nn.Module):
     """
@@ -65,8 +66,13 @@ class BackboneBase(nn.Module):
     def __init__(self, backbone: nn.Module, backbone_name, train_backbone: bool,
                  num_channels: int, return_interm_layers: bool, hidden_dim: int = 256):
         super().__init__()
+        # for name, parameter in backbone.named_parameters():
+        #     if not train_backbone or 'layer2' not in name and 'layer3' not in name and 'layer4' not in name:
+        #         parameter.requires_grad_(False)
         for name, parameter in backbone.named_parameters():
-            if not train_backbone or 'layer2' not in name and 'layer3' not in name and 'layer4' not in name:
+            if not train_backbone:
+                parameter.requires_grad_(False)
+            else:
                 parameter.requires_grad_(False)
         if return_interm_layers:
             return_layers = {"layer1": "0", "layer2": "1", "layer3": "2", "layer4": "3"}
@@ -88,12 +94,15 @@ class BackboneBase(nn.Module):
         # self.input_proj2 = nn.Sequential(
         #             nn.Conv2d(num_channels//2, hidden_dim, kernel_size=(1, 1)),
         #             nn.GroupNorm(32, hidden_dim))
-        self.input_proj3 = nn.Sequential(
-                    nn.Conv2d(num_channels, hidden_dim, kernel_size=(1, 1)),
-                    nn.GroupNorm(32, hidden_dim))
+        # self.input_proj3 = nn.Sequential(
+        #             nn.Conv2d(num_channels, hidden_dim, kernel_size=(1, 1)),
+        #             nn.GroupNorm(32, hidden_dim))
         # self.input_proj4 = nn.Sequential(
         #             nn.Conv2d(num_channels, hidden_dim, kernel_size=(3, 3), stride=2),
         #             nn.GroupNorm(32, hidden_dim))
+        self.num_channels_list = [num_channels//8, num_channels//4, num_channels//2, num_channels]
+        self.num_channels_list = self.num_channels_list[1:]
+        self.epff = FPNFusionModule(self.num_channels_list, fuse_dim=hidden_dim, n_block=len(self.num_channels_list))
 
     def forward(self, tensor_list: NestedTensor):
         xx = self.body(tensor_list.tensors)
@@ -104,7 +113,8 @@ class BackboneBase(nn.Module):
             # layer3.shape: (1, 768, 12, 16)
             # xs['0'] = xx[1]
             # xs['1'] = xx[2]
-            xs['2'] = xx[3]
+            # xs['2'] = xx[3]
+            xs['2'] = self.epff(list(xx[1:]))[-1]
             # print('xs[0].shape: {}, xs[1].shape: {}, xs[2].shape: {}'.format(xs['0'].shape, xs['1'].shape, xs['2'].shape))
         else:
             xs = xx
@@ -112,9 +122,10 @@ class BackboneBase(nn.Module):
         assert m is not None
         out: Dict[str, NestedTensor] = {}
         for name, x in xs.items():
-            scale_map = self.input_proj3(x)
-            mask = F.interpolate(m[None].float(), size=scale_map.shape[-2:]).to(torch.bool)[0]
-            out[name] = NestedTensor(scale_map, mask)
+            # scale_map = self.input_proj3(x)
+            mask = F.interpolate(m[None].float(), size=x.shape[-2:]).to(torch.bool)[0]
+            # out[name] = NestedTensor(scale_map, mask)
+            out[name] = NestedTensor(x, mask)
             
         #     if name == '0':
         #         scale_map = self.input_proj1(x)
@@ -141,7 +152,7 @@ class Backbone(BackboneBase):
         if name.startswith('swin'):
             backbone = getattr(SwinPatch, name)(patch_size=4,
                                                 in_chans=3,
-                                                window_size=7)
+                                                window_size=7, frozen_stages=4)
             if swin_path != '':
                 backbone.init_weights(swin_path)
         else:

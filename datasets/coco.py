@@ -139,13 +139,14 @@ def make_coco_transforms(image_set, args):
         T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
 
-    scales = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
+    # scales = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
+    scales = [480, 496, 512, 528, 544, 560, 576, 592, 608, 624, 640, 656, 672, 688, 704, 720, 736, 752, 768, 784, 800]
 
     if image_set == 'train':
         if args.large_scale_jitter:
             return T.Compose([
                 T.RandomHorizontalFlip(),
-                T.LargeScaleJitter(output_size=1333, aug_scale_min=0.3, aug_scale_max=2.0),
+                T.LargeScaleJitter(output_size=args.input_size, aug_scale_min=0.3, aug_scale_max=2.0),
                 T.RandomDistortion(0.5, 0.5, 0.5, 0.5),
                 normalize,
             ])
@@ -153,11 +154,11 @@ def make_coco_transforms(image_set, args):
             return T.Compose([
                 T.RandomHorizontalFlip(),
                 T.RandomSelect(
-                    T.RandomResize(scales, max_size=1333),
+                    T.RandomResize(scales, max_size=args.input_size),
                     T.Compose([
                         T.RandomResize([400, 500, 600]),
                         T.RandomSizeCrop(384, 600),
-                        T.RandomResize(scales, max_size=1333),
+                        T.RandomResize(scales, max_size=args.input_size),
                     ])
                 ),
                 normalize,
@@ -166,12 +167,12 @@ def make_coco_transforms(image_set, args):
     if image_set == 'val':
         if args.large_scale_jitter:
             return T.Compose([
-                T.LargeScaleJitter(output_size=1333, aug_scale_min=1.0, aug_scale_max=1.0),
+                T.LargeScaleJitter(output_size=args.input_size, aug_scale_min=1.0, aug_scale_max=1.0),
                 normalize,
             ])
         else:
             return T.Compose([
-                T.RandomResize([800], max_size=1333),
+                T.RandomResize([800], max_size=args.input_size),
                 normalize,
             ])
 

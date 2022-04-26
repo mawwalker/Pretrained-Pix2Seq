@@ -29,11 +29,11 @@ def crop(image, target, region):
     if "boxes" in target:
         boxes = target["boxes"]
         max_size = torch.as_tensor([w, h], dtype=torch.float32)
-        cropped_boxes = boxes - torch.as_tensor([j, i, j, i])
-        cropped_boxes = torch.min(cropped_boxes.reshape(-1, 2, 2), max_size)
+        cropped_boxes = boxes - torch.as_tensor([j, i, j, i, j, i, j, i])
+        cropped_boxes = torch.min(cropped_boxes.reshape(-1, 4, 2), max_size)
         cropped_boxes = cropped_boxes.clamp(min=0)
         area = (cropped_boxes[:, 1, :] - cropped_boxes[:, 0, :]).prod(dim=1)
-        target["boxes"] = cropped_boxes.reshape(-1, 4)
+        target["boxes"] = cropped_boxes.reshape(-1, 8)
         target["area"] = area
         fields.append("boxes")
 
@@ -58,14 +58,15 @@ def crop(image, target, region):
     if "boxes" in target or "masks" in target:
         # favor boxes selection when defining which elements to keep
         # this is compatible with previous implementation
-        if "boxes" in target:
-            cropped_boxes = target['boxes'].reshape(-1, 2, 2)
-            keep = torch.all(cropped_boxes[:, 1, :] > cropped_boxes[:, 0, :], dim=1)
-        else:
-            keep = target['masks'].flatten(1).any(1)
+        # if "boxes" in target:
+        #     cropped_boxes = target['boxes'].reshape(-1, 4, 2)
+        #     keep = torch.all(cropped_boxes[:, 1, :] > cropped_boxes[:, 0, :], dim=1)
+        # else:
+        #     keep = target['masks'].flatten(1).any(1)
 
         for field in fields:
-            target[field] = target[field][keep]
+            # target[field] = target[field][keep]
+            target[field] = target[field]
 
     return cropped_image, target
 
@@ -137,7 +138,7 @@ def resize(image, target, size, max_size=None):
     target = target.copy()
     if "boxes" in target:
         boxes = target["boxes"]
-        scaled_boxes = boxes * torch.as_tensor([ratio_width, ratio_height, ratio_width, ratio_height])
+        scaled_boxes = boxes * torch.as_tensor([ratio_width, ratio_height, ratio_width, ratio_height, ratio_width, ratio_height, ratio_width, ratio_height])
         target["boxes"] = scaled_boxes
 
     if "polygons" in target:

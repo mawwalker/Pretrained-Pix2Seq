@@ -638,26 +638,26 @@ class SwinPatch():
     def __init__(self) -> None:
         pass
 
-    def swin_T(patch_size=4, in_chans=3, window_size=7):
+    def swin_T(patch_size=4, in_chans=3, window_size=7, frozen_stages=-1):
         return SwinTransformer(patch_size=patch_size,
                                 in_chans=in_chans,
                                 embed_dim=96,
                                 depths=[ 2, 2, 6, 2 ],
                                 num_heads=[ 3, 6, 12, 24 ],
-                                window_size=window_size)
+                                window_size=window_size, frozen_stages=frozen_stages)
 
-    def swin_B(patch_size=4, in_chans=3, window_size=7):
+    def swin_B(patch_size=4, in_chans=3, window_size=7, frozen_stages=-1):
         return SwinTransformer(patch_size=patch_size,
                                 in_chans=in_chans,
                                 embed_dim=128,
                                 depths=[ 2, 2, 18, 2 ],
                                 num_heads=[ 4, 8, 16, 32 ],
-                                window_size=window_size)
+                                window_size=window_size, frozen_stages=frozen_stages)
 
-    def swin_L(patch_size=4, in_chans=3, window_size=7):
+    def swin_L(patch_size=4, in_chans=3, window_size=7, frozen_stages=-1):
         return SwinTransformer(patch_size=patch_size,
                                 in_chans=in_chans,
                                 embed_dim=192,
                                 depths=[ 2, 2, 18, 2 ],
                                 num_heads=[ 6, 12, 24, 48 ],
-                                window_size=window_size)
+                                window_size=window_size, frozen_stages=frozen_stages)

@@ -242,7 +242,7 @@ class IoULoss(nn.Module):
             gt_box = gt_box.reshape(gt_box.shape[0], 4, 2)
             det_box = det_boxes[i][:gt_box.shape[0], ...]
             det_box = det_box.reshape(gt_box.shape[0], 4, 2)
-            loss_giou =  (1 - torch.diag(box_iou_rotated_poly(gt_box, det_box)[2])).sum() / gt_box.shape[0]
+            loss_giou =  (1 - torch.diag(box_iou_rotated_poly(gt_box, det_box)[2])).mean()
             losses_IoU.append(loss_giou)
         return torch.mean((torch.stack(losses_IoU)))
 
