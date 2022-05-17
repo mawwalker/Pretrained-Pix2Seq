@@ -26,7 +26,7 @@ def get_args_parser():
     parser.add_argument('--lr_backbone', default=1e-5, type=float)
     parser.add_argument('--weight_decay', default=0.05, type=float)
     parser.add_argument('--batch_size', default=4, type=int)
-    parser.add_argument('--epochs', default=600, type=int)
+    parser.add_argument('--epochs', default=300, type=int)
     parser.add_argument('--lr_drop', default=200, type=int)
     parser.add_argument('--clip_max_norm', default=0.1, type=float,
                         help='gradient clipping max norm')
@@ -213,7 +213,8 @@ def main(args):
             rand_target=args.rand_target)
         lr_scheduler.step()
 
-        if epoch > 150 and (epoch % args.eval_epoch == 0 or epoch == (args.lr_drop - 1) or epoch == (args.epochs - 1)):
+        # if epoch > 150 and (epoch % args.eval_epoch == 0 or epoch == (args.lr_drop - 1) or epoch == (args.epochs - 1)):
+        if (epoch % args.eval_epoch == 0 or epoch == (args.lr_drop - 1) or epoch == (args.epochs - 1)):
             test_stats, coco_evaluator = evaluate(
                 model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir
             )
