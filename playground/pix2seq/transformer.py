@@ -24,7 +24,8 @@ class Transformer(nn.Module):
     def __init__(self, d_model=512, nhead=8, num_encoder_layers=6,
                  num_decoder_layers=6, dim_feedforward=1024, dropout=0.1,
                  activation="relu", normalize_before=False, num_vocal=2094,
-                 pred_eos=False, scales=1, k=4, last_height=16, last_width=16, need_attn=False):
+                 pred_eos=False, scales=1, k=4, last_height=16, last_width=16, need_attn=False,
+                 maxdet=100):
         super().__init__()
         rpe_config = irpe.get_rpe_config(
                         ratio=1.9,
@@ -64,6 +65,7 @@ class Transformer(nn.Module):
         self.d_model = d_model
         self.nhead = nhead
         self.num_decoder_layers = num_decoder_layers
+        self.maxdet = maxdet
 
     def _reset_parameters(self):
         for p in self.parameters():
@@ -135,7 +137,7 @@ class Transformer(nn.Module):
             end_lens = torch.zeros(bs).long().to(memory[0].device)
             input_embed = self.det_embed.weight.unsqueeze(0).repeat(bs, 1, 1).transpose(0, 1)
             pred_seq_logits = []
-            for seq_i in range(900):
+            for seq_i in range(9 * self.maxdet):
                 hs, pre_kv = self.decoder(
                     input_embed,
                     memory[0],
@@ -157,7 +159,7 @@ class Transformer(nn.Module):
                 input_embed = self.vocal_embed(pred_token)
 
             if not self.pred_eos:
-                end_lens = end_lens.fill_(900)
+                end_lens = end_lens.fill_(9 * self.maxdet)
             pred_seq_logits = torch.cat(pred_seq_logits, dim=1)
             pred_seq_logits = [psl[:end_idx] for end_idx, psl in zip(end_lens, pred_seq_logits)]
             return pred_seq_logits
@@ -477,7 +479,8 @@ def build_transformer(args, num_vocal):
         normalize_before=args.pre_norm,
         num_vocal=num_vocal,
         pred_eos=args.pred_eos,
-        need_attn=args.need_attn
+        need_attn=args.need_attn,
+        maxdet=args.maxdet
     )
 
 

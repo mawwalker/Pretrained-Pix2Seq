@@ -141,6 +141,7 @@ def make_coco_transforms(image_set, args):
 
     # scales = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
     scales = [480, 496, 512, 528, 544, 560, 576, 592, 608, 624, 640, 656, 672, 688, 704, 720, 736, 752, 768, 784, 800]
+    scales = [480, 496, 512, 528, 544, 560, 576, 592, 608, 624, 640, 656, 672, 688]
 
     if image_set == 'train':
         if args.large_scale_jitter:
@@ -172,7 +173,8 @@ def make_coco_transforms(image_set, args):
             ])
         else:
             return T.Compose([
-                T.RandomResize([800], max_size=args.input_size),
+                # T.RandomResize([800], max_size=args.input_size),
+                T.RandomResize([688], max_size=args.input_size),
                 normalize,
             ])
 

@@ -7,12 +7,13 @@ python -m torch.distributed.launch --nproc_per_node=$GPUS --use_env main.py \
     --rand_target \
     --model pix2seq \
     --epochs 300 \
-    --input_size 800 \
-    --resume ./output/dota_v6_2_new/checkpoint_240_472.pth \
-    --transfer \
+    --input_size 688 \
+    --resume ./output/dota_all_v7_600/checkpoint.pth \
     --backbone swin_L \
     --swin_path weights/swin_large_patch4_window7_224_22k.pth \
-    --batch_size 1 \
-    --coco_path ./DOTA \
-    --num_classes 2 \
-    --output_dir ./output/dota_v6_2_new
+    --batch_size 48 \
+    --coco_path ./DOTA_all \
+    --num_classes 17 \
+    --maxdet 150 \
+    --output_dir ./output/dota_all_v7_600 \
+    --eval

@@ -20,7 +20,7 @@ from playground.box_iou_rotated_nn.box_iou_rotated_diff import box_iou_rotated_p
 
 class Pix2Seq(nn.Module):
     """ This is the Pix2Seq module that performs object detection """
-    def __init__(self, backbone, transformer, num_classes, num_bins=2000, input_size=1333):
+    def __init__(self, backbone, transformer, num_classes, num_bins=2000, input_size=1333, maxdet=100):
         """ Initializes the model.
         Parameters:
             backbone: torch module of the backbone to be used. See backbone.py
@@ -38,6 +38,7 @@ class Pix2Seq(nn.Module):
         #     nn.GroupNorm(32, hidden_dim))
         self.backbone = backbone
         self.input_size = input_size
+        self.maxdet = maxdet
 
     def forward(self, samples):
         """ 
@@ -83,7 +84,8 @@ class Pix2Seq(nn.Module):
         out_seq = self.transformer(src, -1, masks, poses)
         return out_seq
 
-    def build_input_seq(self, targets, max_objects=100):
+    def build_input_seq(self, targets):
+        max_objects = self.maxdet
         device = targets[0]["labels"].device
         input_seq_list = []
         for b_i, target in enumerate(targets):
@@ -97,6 +99,11 @@ class Pix2Seq(nn.Module):
             scaled_box = box * scale_factor
             # scaled_box = box_cxcywh_to_xyxy(scaled_box)
             box_tokens = (scaled_box / self.input_size * self.num_bins).floor().long().clamp(min=0, max=self.num_bins)
+            if box_tokens.shape[0] > max_objects:
+                box_tokens = box_tokens[:max_objects - 1, ...]
+                label_token = label_token[:max_objects - 1, ...]
+            # print("box_token shape: ", box_tokens.shape)
+            # print("label_token shape: ", label_token.shape)
             input_tokens = torch.cat([box_tokens, label_token], dim=1)
 
             num_objects = input_tokens.shape[0]
@@ -251,7 +258,7 @@ class SetCriterion(nn.Module):
     """
     This class computes the loss for Pix2Seq.
     """
-    def __init__(self, num_classes, weight_dict, eos_coef, num_bins, num_vocal, input_size=1333):
+    def __init__(self, num_classes, weight_dict, eos_coef, num_bins, num_vocal, input_size=1333, maxdet=100):
         """ Create the criterion.
         Parameters:
             num_classes: number of object categories, omitting the special no-object category
@@ -268,10 +275,12 @@ class SetCriterion(nn.Module):
         self.register_buffer('empty_weight', empty_weight)
         self.weight_dict = weight_dict
         self.input_size = input_size
-        self.postprocessors = {'bbox': PostProcess_Train(num_bins, num_classes, input_size)}
-        self.iou_loss_M = IoULoss(self.postprocessors)
+        self.maxdet = maxdet
+        # self.postprocessors = {'bbox': PostProcess_Train(num_bins, num_classes, input_size)}
+        # self.iou_loss_M = IoULoss(self.postprocessors)
 
-    def build_target_seq(self, targets, max_objects=100):
+    def build_target_seq(self, targets):
+        max_objects = self.maxdet
         device = targets[0]["labels"].device
         target_seq_list = []
         for target in targets:
@@ -284,6 +293,9 @@ class SetCriterion(nn.Module):
             box = box * torch.stack([w, h, w, h, w, h, w, h], dim=0)
             # box = box_cxcywh_to_xyxy(box)
             box = (box / self.input_size * self.num_bins).floor().long().clamp(min=0, max=self.num_bins)
+            if box.shape[0] > max_objects:
+                box = box[:max_objects - 1, ...]
+                label = label[:max_objects -1, ...]
             target_tokens = torch.cat([box, label], dim=1).flatten()
 
             end_token = torch.tensor([self.num_vocal - 2], dtype=torch.int64).to(device)
@@ -329,11 +341,11 @@ class SetCriterion(nn.Module):
 
         loss_seq = F.cross_entropy(pred_seq_logits, target_seq, weight=self.empty_weight, reduction='sum') / num_pos
 
-        iou_loss = self.iou_loss_M(outputs, targets)
+        # iou_loss = self.iou_loss_M(outputs, targets)
         # Compute all the requested losses
         losses = dict()
         losses["loss_seq"] = loss_seq
-        losses['iou_loss'] = iou_loss
+        # losses['iou_loss'] = iou_loss
         return losses
 
 def isfakebox(box):
@@ -448,18 +460,20 @@ def build(args):
         transformer,
         num_classes=num_classes,
         num_bins=num_bins,
-        input_size=args.input_size)
+        input_size=args.input_size,
+        maxdet=args.maxdet)
 
     # weight_dict = {'loss_seq': 1, 'mse': 1, 'iou_loss': 1}
     weight_dict = {'loss_seq': 1, 'iou_loss': 2}
-    # weight_dict = {'loss_seq': 1}
+    weight_dict = {'loss_seq': 1}
     criterion = SetCriterion(
         num_classes,
         weight_dict,
         eos_coef=args.eos_coef,
         num_bins=num_bins,
         num_vocal=num_vocal,
-        input_size=args.input_size)
+        input_size=args.input_size,
+        maxdet=args.maxdet)
     criterion.to(device)
     postprocessors = {'bbox': PostProcess(num_bins, num_classes, args.input_size)}
 

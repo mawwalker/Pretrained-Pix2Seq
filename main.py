@@ -18,7 +18,7 @@ from engine import evaluate, train_one_epoch
 # from models import build_model
 from playground import build_all_model
 from timm.utils import NativeScaler
-
+torch.multiprocessing.set_sharing_strategy('file_system')
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
@@ -80,14 +80,14 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='./output/HRSC_4cls_v5/checkpoint.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--eval', default=False, action='store_true')
-    parser.add_argument('--num_workers', default=2, type=int)
+    parser.add_argument('--num_workers', default=10, type=int)
 
     # distributed training parameters
-    parser.add_argument('--world_size', default=2, type=int,
+    parser.add_argument('--world_size', default=4, type=int,
                         help='number of distributed processes')
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
     
@@ -96,6 +96,7 @@ def get_args_parser():
     parser.add_argument('--transfer', default=False, action='store_true', help='transfer learning from swin & COCO-pretrained-pix2seq')
     parser.add_argument('--activation', default='relu', help='transformer activation function')
     parser.add_argument('--input_size', default=1333, type=int, help='input size of the pix2seq model')
+    parser.add_argument('--maxdet', default=100, type=int, help='max detection number')
     parser.add_argument('--need_attn', default=False, action='store_true',
                         help='if return the deformable attention weights, for visualization only')
     return parser
@@ -214,7 +215,8 @@ def main(args):
         lr_scheduler.step()
 
         # if epoch > 150 and (epoch % args.eval_epoch == 0 or epoch == (args.lr_drop - 1) or epoch == (args.epochs - 1)):
-        if (epoch % args.eval_epoch == 0 or epoch == (args.lr_drop - 1) or epoch == (args.epochs - 1)):
+        # if (epoch % args.eval_epoch == 0 or epoch == (args.lr_drop - 1) or epoch == (args.epochs - 1)):
+        if False:
             test_stats, coco_evaluator = evaluate(
                 model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir
             )
@@ -233,7 +235,7 @@ def main(args):
         if args.output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth']
             # extra checkpoint before LR drop and every 100 epochs
-            if (epoch + 1) % args.lr_drop == 0 or (epoch + 1) % 100 == 0:
+            if (epoch + 1) % args.lr_drop == 0 or (epoch + 1) % 5 == 0:
                 checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
             if cur_ap > max_ap:
                 checkpoint_paths.append(output_dir / 'checkpoint_best.pth')

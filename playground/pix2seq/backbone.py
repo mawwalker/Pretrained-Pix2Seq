@@ -100,9 +100,9 @@ class BackboneBase(nn.Module):
         # self.input_proj4 = nn.Sequential(
         #             nn.Conv2d(num_channels, hidden_dim, kernel_size=(3, 3), stride=2),
         #             nn.GroupNorm(32, hidden_dim))
-        self.num_channels_list = [num_channels//8, num_channels//4, num_channels//2, num_channels]
-        self.num_channels_list = self.num_channels_list[1:]
-        self.epff = FPNFusionModule(self.num_channels_list, fuse_dim=hidden_dim, n_block=len(self.num_channels_list))
+        self.num_channels_list = [num_channels//4, num_channels//2, num_channels, num_channels]
+        # self.num_channels_list = self.num_channels_list
+        self.epff = FPNFusionModule(self.num_channels_list, fuse_dim=hidden_dim, n_block=4)
 
     def forward(self, tensor_list: NestedTensor):
         xx = self.body(tensor_list.tensors)
@@ -114,7 +114,7 @@ class BackboneBase(nn.Module):
             # xs['0'] = xx[1]
             # xs['1'] = xx[2]
             # xs['2'] = xx[3]
-            xs['2'] = self.epff(list(xx[1:]))[-1]
+            xs['2'] = self.epff([xx[1], xx[2], xx[3], xx[3]])[-1]
             # print('xs[0].shape: {}, xs[1].shape: {}, xs[2].shape: {}'.format(xs['0'].shape, xs['1'].shape, xs['2'].shape))
         else:
             xs = xx
